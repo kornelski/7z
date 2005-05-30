@@ -1,4 +1,4 @@
-// 7z/Handler.cpp
+// 7zHandler.cpp
 
 #include "StdAfx.h"
 
@@ -6,14 +6,15 @@
 #include "7zProperties.h"
 
 #include "../../../Common/IntToString.h"
-// #include "../../../Common/StringConvert.h"
 #include "../../../Common/ComTry.h"
-
 #include "../../../Windows/Defs.h"
 
 #include "../Common/ItemNameUtils.h"
+#ifdef _7Z_VOL
+#include "../Common/MultiStream.h"
+#endif
 
-// #include "7zMethods.h"
+using namespace NWindows;
 
 namespace NArchive {
 namespace N7z {
@@ -28,31 +29,15 @@ CHandler::CHandler()
   #endif
 }
 
-/*
-STDMETHODIMP CHandler::EnumProperties(IEnumSTATPROPSTG **enumerator)
+STDMETHODIMP CHandler::GetNumberOfItems(UInt32 *numItems)
 {
-  #ifndef _SFX
   COM_TRY_BEGIN
-  CComObjectNoLock<CEnumArchiveItemProperty> *enumeratorSpec = 
-      new CComObjectNoLock<CEnumArchiveItemProperty>;
-  if (enumeratorSpec == NULL)
-    return E_OUTOFMEMORY;
-  CMyComPtr<IEnumSTATPROPSTG> tempEnumerator(enumeratorSpec);
-  enumeratorSpec->Init(_database.ArchiveInfo.FileInfoPopIDs);
-  *enumerator = tempEnumerator.Detach();
-  return S_OK;
-  // return tempEnumerator->QueryInterface(IID_IEnumSTATPROPSTG, (LPVOID*)enumerator);
-  COM_TRY_END
+  *numItems = 
+  #ifdef _7Z_VOL
+  _refs.Size();
   #else
-    return E_NOTIMPL;
-  #endif
-}
-*/
-
-STDMETHODIMP CHandler::GetNumberOfItems(UINT32 *numItems)
-{
-  COM_TRY_BEGIN
   *numItems = _database.Files.Size();
+  #endif
   return S_OK;
   COM_TRY_END
 }
@@ -65,12 +50,12 @@ STDMETHODIMP CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value)
 
 #ifdef _SFX
 
-STDMETHODIMP CHandler::GetNumberOfProperties(UINT32 *numProperties)
+STDMETHODIMP CHandler::GetNumberOfProperties(UInt32 *numProperties)
 {
   return E_NOTIMPL;
 }
 
-STDMETHODIMP CHandler::GetPropertyInfo(UINT32 index,     
+STDMETHODIMP CHandler::GetPropertyInfo(UInt32 index,     
       BSTR *name, PROPID *propID, VARTYPE *varType)
 {
   return E_NOTIMPL;
@@ -79,13 +64,13 @@ STDMETHODIMP CHandler::GetPropertyInfo(UINT32 index,
 #endif
 
 
-STDMETHODIMP CHandler::GetNumberOfArchiveProperties(UINT32 *numProperties)
+STDMETHODIMP CHandler::GetNumberOfArchiveProperties(UInt32 *numProperties)
 {
   *numProperties = 0;
   return S_OK;
 }
 
-STDMETHODIMP CHandler::GetArchivePropertyInfo(UINT32 index,     
+STDMETHODIMP CHandler::GetArchivePropertyInfo(UInt32 index,     
       BSTR *name, PROPID *propID, VARTYPE *varType)
 {
   return E_NOTIMPL;
@@ -95,30 +80,22 @@ STDMETHODIMP CHandler::GetArchivePropertyInfo(UINT32 index,
 static void MySetFileTime(bool timeDefined, FILETIME unixTime, 
     NWindows::NCOM::CPropVariant &propVariant)
 {
-  // FILETIME fileTime;
   if (timeDefined)
     propVariant = unixTime;
-    // NTime::UnixTimeToFileTime((time_t)unixTime, fileTime);
-  else
-  {
-    return;
-    // fileTime.dwHighDateTime = fileTime.dwLowDateTime = 0;
-  }
-  // propVariant = fileTime;
 }
 
 /*
-inline static wchar_t GetHex(BYTE value)
+inline static wchar_t GetHex(Byte value)
 {
   return (value < 10) ? ('0' + value) : ('A' + (value - 10));
 }
 
-static UString ConvertBytesToHexString(const BYTE *data, UINT32 size)
+static UString ConvertBytesToHexString(const Byte *data, UInt32 size)
 {
   UString result;
-  for (UINT32 i = 0; i < size; i++)
+  for (UInt32 i = 0; i < size; i++)
   {
-    BYTE b = data[i];
+    Byte b = data[i];
     result += GetHex(b >> 4);
     result += GetHex(b & 0xF);
   }
@@ -129,32 +106,32 @@ static UString ConvertBytesToHexString(const BYTE *data, UINT32 size)
 
 #ifndef _SFX
 
-static UString ConvertUINT32ToString(UINT32 value)
+static UString ConvertUInt32ToString(UInt32 value)
 {
   wchar_t buffer[32];
-  ConvertUINT64ToString(value, buffer);
+  ConvertUInt64ToString(value, buffer);
   return buffer;
 }
 
-static UString GetStringForSizeValue(UINT32 value)
+static UString GetStringForSizeValue(UInt32 value)
 {
   for (int i = 31; i >= 0; i--)
-    if ((UINT32(1) << i) == value)
-      return ConvertUINT32ToString(i);
+    if ((UInt32(1) << i) == value)
+      return ConvertUInt32ToString(i);
   UString result;
   if (value % (1 << 20) == 0)
   {
-    result += ConvertUINT32ToString(value >> 20);
+    result += ConvertUInt32ToString(value >> 20);
     result += L"m";
   }
   else if (value % (1 << 10) == 0)
   {
-    result += ConvertUINT32ToString(value >> 10);
+    result += ConvertUInt32ToString(value >> 10);
     result += L"k";
   }
   else
   {
-    result += ConvertUINT32ToString(value);
+    result += ConvertUInt32ToString(value);
     result += L"b";
   }
   return result;
@@ -168,11 +145,11 @@ static CMethodID k_PPMD  = { { 0x3, 0x4, 0x1 }, 3 };
 static CMethodID k_Deflate = { { 0x4, 0x1, 0x8 }, 3 };
 static CMethodID k_BZip2 = { { 0x4, 0x2, 0x2 }, 3 };
 
-static inline char GetHex(BYTE value)
+static inline char GetHex(Byte value)
 {
   return (value < 10) ? ('0' + value) : ('A' + (value - 10));
 }
-static inline UString GetHex2(BYTE value)
+static inline UString GetHex2(Byte value)
 {
   UString result;
   result += GetHex(value >> 4);
@@ -182,39 +159,78 @@ static inline UString GetHex2(BYTE value)
 
 #endif
 
-STDMETHODIMP CHandler::GetProperty(UINT32 index, PROPID propID,  PROPVARIANT *value)
+static inline UInt32 GetUInt32FromMemLE(const Byte *p)
+{
+  return p[0] | (((UInt32)p[1]) << 8) | (((UInt32)p[2]) << 16) | (((UInt32)p[3]) << 24);
+}
+
+STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID,  PROPVARIANT *value)
 {
   COM_TRY_BEGIN
   NWindows::NCOM::CPropVariant propVariant;
+  
+  /*
+  const CRef2 &ref2 = _refs[index];
+  if (ref2.Refs.IsEmpty())
+    return E_FAIL;
+  const CRef &ref = ref2.Refs.Front();
+  */
+  
+  #ifdef _7Z_VOL
+  const CRef &ref = _refs[index];
+  const CVolume &volume = _volumes[ref.VolumeIndex];
+  const CArchiveDatabaseEx &_database = volume.Database;
+  UInt32 index2 = ref.ItemIndex;
+  const CFileItem &item = _database.Files[index2];
+  #else
   const CFileItem &item = _database.Files[index];
+  UInt32 index2 = index;
+  #endif
 
   switch(propID)
   {
     case kpidPath:
     {
-      propVariant = NArchive::NItemName::GetOSName(item.Name);
+      if (!item.Name.IsEmpty())
+        propVariant = NItemName::GetOSName(item.Name);
       break;
     }
     case kpidIsFolder:
       propVariant = item.IsDirectory;
       break;
     case kpidSize:
+    {
       propVariant = item.UnPackSize;
+      // propVariant = ref2.UnPackSize;
       break;
+    }
+    case kpidPosition:
+    {
+      /*
+      if (ref2.Refs.Size() > 1)
+        propVariant = ref2.StartPos;
+      else
+      */
+        if (item.IsStartPosDefined)
+          propVariant = item.StartPos;
+      break;
+    }
     case kpidPackedSize:
     {
+      // propVariant = ref2.PackSize;
       {
-        int folderIndex = _database.FileIndexToFolderIndexMap[index];
-        if (folderIndex >= 0)
+        CNum folderIndex = _database.FileIndexToFolderIndexMap[index2];
+        if (folderIndex != kNumNoIndex)
         {
-          const CFolder &folderInfo = _database.Folders[folderIndex];
-          if (_database.FolderStartFileIndex[folderIndex] == index)
+          if (_database.FolderStartFileIndex[folderIndex] == (CNum)index2)
             propVariant = _database.GetFolderFullPackSize(folderIndex);
+          /*
           else
-            propVariant = UINT64(0);
+            propVariant = UInt64(0);
+          */
         }
         else
-          propVariant = UINT64(0);
+          propVariant = UInt64(0);
       }
       break;
     }
@@ -232,14 +248,14 @@ STDMETHODIMP CHandler::GetProperty(UINT32 index, PROPID propID,  PROPVARIANT *va
         propVariant = item.Attributes;
       break;
     case kpidCRC:
-      if (item.FileCRCIsDefined)
+      if (item.IsFileCRCDefined)
         propVariant = item.FileCRC;
       break;
     #ifndef _SFX
     case kpidMethod:
       {
-        int folderIndex = _database.FileIndexToFolderIndexMap[index];
-        if (folderIndex >= 0)
+        CNum folderIndex = _database.FileIndexToFolderIndexMap[index2];
+        if (folderIndex != kNumNoIndex)
         {
           const CFolder &folderInfo = _database.Folders[folderIndex];
           UString methodsString;
@@ -292,24 +308,24 @@ STDMETHODIMP CHandler::GetProperty(UINT32 index, PROPID propID,  PROPVARIANT *va
                 methodsString += methodName;
                 if (altCoderInfo.MethodID == k_LZMA)
                 {
-                  if (altCoderInfo.Properties.GetCapacity() == 5)
+                  if (altCoderInfo.Properties.GetCapacity() >= 5)
                   {
                     methodsString += L":";
-                    UINT32 dicSize = *(const UINT32 *)
-                      ((const BYTE *)altCoderInfo.Properties + 1);
+                    UInt32 dicSize = GetUInt32FromMemLE(
+                      ((const Byte *)altCoderInfo.Properties + 1));
                     methodsString += GetStringForSizeValue(dicSize);
                   }
                 }
                 else if (altCoderInfo.MethodID == k_PPMD)
                 {
-                  if (altCoderInfo.Properties.GetCapacity() == 5)
+                  if (altCoderInfo.Properties.GetCapacity() >= 5)
                   {
-                    BYTE order = *(const BYTE *)altCoderInfo.Properties;
+                    Byte order = *(const Byte *)altCoderInfo.Properties;
                     methodsString += L":o";
-                    methodsString += ConvertUINT32ToString(order);
+                    methodsString += ConvertUInt32ToString(order);
                     methodsString += L":mem";
-                    UINT32 dicSize = *(const UINT32 *)
-                      ((const BYTE *)altCoderInfo.Properties + 1);
+                    UInt32 dicSize = GetUInt32FromMemLE(
+                      ((const Byte *)altCoderInfo.Properties + 1));
                     methodsString += GetStringForSizeValue(dicSize);
                   }
                 }
@@ -318,7 +334,7 @@ STDMETHODIMP CHandler::GetProperty(UINT32 index, PROPID propID,  PROPVARIANT *va
                   if (altCoderInfo.Properties.GetCapacity() > 0)
                   {
                     methodsString += L":[";
-                    for (int bi = 0; bi < altCoderInfo.Properties.GetCapacity(); bi++)
+                    for (size_t bi = 0; bi < altCoderInfo.Properties.GetCapacity(); bi++)
                     {
                       if (bi > 2 && bi + 1 < altCoderInfo.Properties.GetCapacity())
                       {
@@ -344,9 +360,9 @@ STDMETHODIMP CHandler::GetProperty(UINT32 index, PROPID propID,  PROPVARIANT *va
       break;
     case kpidBlock:
       {
-        int folderIndex = _database.FileIndexToFolderIndexMap[index];
-        if (folderIndex >= 0)
-          propVariant = (UINT32)folderIndex;
+        CNum folderIndex = _database.FileIndexToFolderIndexMap[index2];
+        if (folderIndex != kNumNoIndex)
+          propVariant = (UInt32)folderIndex;
       }
       break;
     case kpidPackedSize0:
@@ -355,20 +371,20 @@ STDMETHODIMP CHandler::GetProperty(UINT32 index, PROPID propID,  PROPVARIANT *va
     case kpidPackedSize3:
     case kpidPackedSize4:
       {
-        int folderIndex = _database.FileIndexToFolderIndexMap[index];
-        if (folderIndex >= 0)
+        CNum folderIndex = _database.FileIndexToFolderIndexMap[index2];
+        if (folderIndex != kNumNoIndex)
         {
           const CFolder &folderInfo = _database.Folders[folderIndex];
-          if (_database.FolderStartFileIndex[folderIndex] == index &&
-              folderInfo.PackStreams.Size() > propID - kpidPackedSize0)
+          if (_database.FolderStartFileIndex[folderIndex] == (CNum)index2 &&
+              folderInfo.PackStreams.Size() > (int)(propID - kpidPackedSize0))
           {
             propVariant = _database.GetFolderPackStreamSize(folderIndex, propID - kpidPackedSize0);
           }
           else
-            propVariant = UINT64(0);
+            propVariant = UInt64(0);
         }
         else
-          propVariant = UINT64(0);
+          propVariant = UInt64(0);
       }
       break;
     #endif
@@ -381,49 +397,238 @@ STDMETHODIMP CHandler::GetProperty(UINT32 index, PROPID propID,  PROPVARIANT *va
   COM_TRY_END
 }
 
+static const wchar_t *kExt = L"7z";
+static const wchar_t *kAfterPart = L".7z";
+
+#ifdef _7Z_VOL
+
+class CVolumeName
+{
+  bool _first;
+  UString _unchangedPart;
+  UString _changedPart;    
+  UString _afterPart;    
+public:
+  bool InitName(const UString &name)
+  {
+    _first = true;
+    int dotPos = name.ReverseFind('.');
+    UString basePart = name;
+    if (dotPos >= 0)
+    {
+      UString ext = name.Mid(dotPos + 1);
+      if (ext.CompareNoCase(kExt)==0 || 
+        ext.CompareNoCase(L"EXE") == 0)
+      {
+        _afterPart = kAfterPart;
+        basePart = name.Left(dotPos);
+      }
+    }
+
+    int numLetters = 1;
+    bool splitStyle = false;
+    if (basePart.Right(numLetters) == L"1")
+    {
+      while (numLetters < basePart.Length())
+      {
+        if (basePart[basePart.Length() - numLetters - 1] != '0')
+          break;
+        numLetters++;
+      }
+    }
+    else 
+      return false;
+    _unchangedPart = basePart.Left(basePart.Length() - numLetters);
+    _changedPart = basePart.Right(numLetters);
+    return true;
+  }
+
+  UString GetNextName()
+  {
+    UString newName; 
+    // if (_newStyle || !_first)
+    {
+      int i;
+      int numLetters = _changedPart.Length();
+      for (i = numLetters - 1; i >= 0; i--)
+      {
+        wchar_t c = _changedPart[i];
+        if (c == L'9')
+        {
+          c = L'0';
+          newName = c + newName;
+          if (i == 0)
+            newName = UString(L'1') + newName;
+          continue;
+        }
+        c++;
+        newName = UString(c) + newName;
+        i--;
+        for (; i >= 0; i--)
+          newName = _changedPart[i] + newName;
+        break;
+      }
+      _changedPart = newName;
+    }
+    _first = false;
+    return _unchangedPart + _changedPart + _afterPart;
+  }
+};
+
+#endif
+
 STDMETHODIMP CHandler::Open(IInStream *stream,
-    const UINT64 *maxCheckStartPosition, 
+    const UInt64 *maxCheckStartPosition, 
     IArchiveOpenCallback *openArchiveCallback)
 {
   COM_TRY_BEGIN
-  _inStream.Release();
-  _database.Clear();
+  Close();
   #ifndef _SFX
   _fileInfoPopIDs.Clear();
   #endif
   try
   {
-    CInArchive archive;
-    RINOK(archive.Open(stream, maxCheckStartPosition));
+    CMyComPtr<IArchiveOpenCallback> openArchiveCallbackTemp = openArchiveCallback;
+    #ifdef _7Z_VOL
+    CVolumeName seqName;
+
+    CMyComPtr<IArchiveOpenVolumeCallback> openVolumeCallback;
+    #endif
 
     #ifndef _NO_CRYPTO
     CMyComPtr<ICryptoGetTextPassword> getTextPassword;
     if (openArchiveCallback)
     {
-      CMyComPtr<IArchiveOpenCallback> openArchiveCallbackTemp = openArchiveCallback;
       openArchiveCallbackTemp.QueryInterface(
           IID_ICryptoGetTextPassword, &getTextPassword);
     }
     #endif
+    #ifdef _7Z_VOL
+    if (openArchiveCallback)
+    {
+      openArchiveCallbackTemp.QueryInterface(IID_IArchiveOpenVolumeCallback, &openVolumeCallback);
+    }
+    while(true)
+    {
+      CMyComPtr<IInStream> inStream;
+      if (!_volumes.IsEmpty())
+      {
+        if (!openVolumeCallback)
+          break;
+        if(_volumes.Size() == 1)
+        {
+          UString baseName;
+          {
+            NCOM::CPropVariant propVariant;
+            RINOK(openVolumeCallback->GetProperty(kpidName, &propVariant));
+            if (propVariant.vt != VT_BSTR)
+              break;
+            baseName = propVariant.bstrVal;
+          }
+          seqName.InitName(baseName);
+        }
 
+        UString fullName = seqName.GetNextName();
+        HRESULT result = openVolumeCallback->GetStream(fullName, &inStream);
+        if (result == S_FALSE)
+          break;
+        if (result != S_OK)
+          return result;
+        if (!stream)
+          break;
+      }
+      else
+        inStream = stream;
+
+      CInArchive archive;
+      RINOK(archive.Open(inStream, maxCheckStartPosition));
+
+      _volumes.Add(CVolume());
+      CVolume &volume = _volumes.Back();
+      CArchiveDatabaseEx &database = volume.Database;
+      volume.Stream = inStream;
+      volume.StartRef2Index = _refs.Size();
+
+      HRESULT result = archive.ReadDatabase(database
+          #ifndef _NO_CRYPTO
+          , getTextPassword
+          #endif
+          );
+      if (result != S_OK)
+      {
+        _volumes.Clear();
+        return result;
+      }
+      database.Fill();
+      for(int i = 0; i < database.Files.Size(); i++)
+      {
+        CRef refNew;
+        refNew.VolumeIndex = _volumes.Size() - 1;
+        refNew.ItemIndex = i;
+        _refs.Add(refNew);
+        /*
+        const CFileItem &file = database.Files[i];
+        int j;
+        */
+        /*
+        for (j = _refs.Size() - 1; j >= 0; j--)
+        {
+          CRef2 &ref2 = _refs[j];
+          const CRef &ref = ref2.Refs.Back();
+          const CVolume &volume2 = _volumes[ref.VolumeIndex];
+          const CArchiveDatabaseEx &database2 = volume2.Database;
+          const CFileItem &file2 = database2.Files[ref.ItemIndex];
+          if (file2.Name.CompareNoCase(file.Name) == 0)
+          {
+            if (!file.IsStartPosDefined)
+              continue;
+            if (file.StartPos != ref2.StartPos + ref2.UnPackSize)
+              continue;
+            ref2.Refs.Add(refNew);
+            break;
+          }
+        }
+        */
+        /*
+        j = -1;
+        if (j < 0)
+        {
+          CRef2 ref2New;
+          ref2New.Refs.Add(refNew);
+          j = _refs.Add(ref2New);
+        }
+        CRef2 &ref2 = _refs[j];
+        ref2.UnPackSize += file.UnPackSize;
+        ref2.PackSize += database.GetFilePackSize(i);
+        if (ref2.Refs.Size() == 1 && file.IsStartPosDefined)
+          ref2.StartPos = file.StartPos;
+        */
+      }
+      if (database.Files.Size() != 1)
+        break;
+      const CFileItem &file = database.Files.Front();
+      if (!file.IsStartPosDefined)
+        break;
+    }
+    #else
+    CInArchive archive;
+    RINOK(archive.Open(stream, maxCheckStartPosition));
     HRESULT result = archive.ReadDatabase(_database
       #ifndef _NO_CRYPTO
       , getTextPassword
       #endif
       );
     RINOK(result);
-    result = archive.CheckIntegrity();
-    if (result != S_OK)
-      return E_FAIL;
-    _database.FillFolderStartPackStream();
-    _database.FillStartPos();
-    _database.FillFolderStartFileIndex();
+    _database.Fill();
+    _inStream = stream;
+    #endif
   }
   catch(...)
   {
+    Close();
     return S_FALSE;
   }
-  _inStream = stream;
+  // _inStream = stream;
   #ifndef _SFX
   FillPopIDs();
   #endif
@@ -434,9 +639,73 @@ STDMETHODIMP CHandler::Open(IInStream *stream,
 STDMETHODIMP CHandler::Close()
 {
   COM_TRY_BEGIN
+  #ifdef _7Z_VOL
+  _volumes.Clear();
+  _refs.Clear();
+  #else
   _inStream.Release();
+  _database.Clear();
+  #endif
   return S_OK;
   COM_TRY_END
 }
+
+#ifdef _7Z_VOL
+STDMETHODIMP CHandler::GetStream(UInt32 index, ISequentialInStream **stream)
+{
+  if (index != 0)
+    return E_INVALIDARG;
+  *stream = 0;
+  CMultiStream *streamSpec = new CMultiStream;
+  CMyComPtr<ISequentialInStream> streamTemp = streamSpec;
+  
+  UInt64 pos = 0;
+  const UString *fileName;
+  for (int i = 0; i < _refs.Size(); i++)
+  {
+    const CRef &ref = _refs[i];
+    const CVolume &volume = _volumes[ref.VolumeIndex];
+    const CArchiveDatabaseEx &database = volume.Database;
+    const CFileItem &file = database.Files[ref.ItemIndex];
+    if (i == 0)
+      fileName = &file.Name;
+    else
+      if (fileName->Compare(file.Name) != 0)
+        return S_FALSE;
+    if (!file.IsStartPosDefined)
+      return S_FALSE;
+    if (file.StartPos != pos)
+      return S_FALSE;
+    CNum folderIndex = database.FileIndexToFolderIndexMap[ref.ItemIndex];
+    if (folderIndex == kNumNoIndex)
+    {
+      if (file.UnPackSize != 0)
+        return E_FAIL;
+      continue;
+    }
+    if (database.NumUnPackStreamsVector[folderIndex] != 1)
+      return S_FALSE;
+    const CFolder &folder = database.Folders[folderIndex];
+    if (folder.Coders.Size() != 1)
+      return S_FALSE;
+    const CCoderInfo &coder = folder.Coders.Front();
+    if (coder.NumInStreams != 1 || coder.NumOutStreams != 1)
+      return S_FALSE;
+    const CAltCoderInfo &altCoder = coder.AltCoders.Front();
+    if (altCoder.MethodID.IDSize != 1 || altCoder.MethodID.ID[0] != 0)
+      return S_FALSE;
+
+    pos += file.UnPackSize;
+    CMultiStream::CSubStreamInfo subStreamInfo;
+    subStreamInfo.Stream = volume.Stream;
+    subStreamInfo.Pos = database.GetFolderStreamPos(folderIndex, 0);
+    subStreamInfo.Size = file.UnPackSize;
+    streamSpec->Streams.Add(subStreamInfo);
+  }
+  streamSpec->Init();
+  *stream = streamTemp.Detach();
+  return S_OK;
+}
+#endif
 
 }}

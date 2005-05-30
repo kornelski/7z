@@ -1,12 +1,7 @@
 // HC2.h
 
-#pragma once
-
-#ifndef __HC2__H
-#define __HC2__H
-
-#undef HC_CLSID
-#define HC_CLSID CLSID_CMatchFinderHC2
+#ifndef __HC2_H
+#define __HC2_H
 
 #undef HC_NAMESPACE
 #define HC_NAMESPACE NHC2

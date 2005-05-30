@@ -126,6 +126,14 @@ SOURCE=.\StdAfx.h
 # PROP Default_Filter ""
 # Begin Source File
 
+SOURCE=..\..\..\Common\Alloc.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\..\Common\Alloc.h
+# End Source File
+# Begin Source File
+
 SOURCE=..\..\..\Common\CRC.cpp
 # End Source File
 # Begin Source File
@@ -266,10 +274,6 @@ SOURCE=..\..\Common\ProgressUtils.h
 # PROP Default_Filter ""
 # Begin Source File
 
-SOURCE=..\Common\ArchiveInterface.h
-# End Source File
-# Begin Source File
-
 SOURCE=..\Common\CodecsPath.cpp
 # End Source File
 # Begin Source File
@@ -300,10 +304,6 @@ SOURCE=..\Common\OutStreamWithCRC.h
 # Begin Source File
 
 SOURCE=.\gz.ico
-# End Source File
-# Begin Source File
-
-SOURCE=.\gz1.ico
 # End Source File
 # End Target
 # End Project

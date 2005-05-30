@@ -3,17 +3,17 @@
 #include "StdAfx.h"
 
 #include "Rar20Crypto.h"
-#include "Common/Crc.h"
+#include "../../../Common/CRC.h"
 
-#define  rol(x,n)  (((x)<<(n)) | ((x)>>(8*sizeof(x)-(n))))
-#define  ror(x,n)  (((x)>>(n)) | ((x)<<(8*sizeof(x)-(n))))
+#define  rol(x,n)  (((x) << (n)) | ((x) >> (8 * sizeof(x) - (n))))
+#define  ror(x,n)  (((x) >> (n)) | ((x) << (8 * sizeof(x) - (n))))
 
 namespace NCrypto {
 namespace NRar20 {
 
 static const int kNumRounds = 32;
 
-static const BYTE InitSubstTable[256]={
+static const Byte InitSubstTable[256] = {
   215, 19,149, 35, 73,197,192,205,249, 28, 16,119, 48,221,  2, 42,
   232,  1,177,233, 14, 88,219, 25,223,195,244, 90, 87,239,153,137,
   255,199,147, 70, 92, 66,246, 13,216, 40, 62, 29,217,230, 86,  6,
@@ -32,23 +32,22 @@ static const BYTE InitSubstTable[256]={
   116,184,160, 96,109, 37, 30,106,140,104,150,  5,204,117,112, 84
 };
 
-void CData::UpdateKeys(const BYTE *data)
+void CData::UpdateKeys(const Byte *data)
 {
   for (int i = 0; i < 16; i += 4)
-    for (int j = 0; j < 4; j ++)
+    for (int j = 0; j < 4; j++)
       Keys[j] ^= CCRC::Table[data[i + j]];
 }
 
-static void Swap(BYTE *Ch1, BYTE *Ch2)
+static void Swap(Byte *b1, Byte *b2)
 {
-  BYTE Ch = *Ch1;
-  *Ch1 = *Ch2;
-  *Ch2 = Ch;
+  Byte b = *b1;
+  *b1 = *b2;
+  *b2 = b;
 }
 
-void CData::SetPassword(const BYTE *password, UINT32 passwordLength)
+void CData::SetPassword(const Byte *password, UInt32 passwordLength)
 {
-
   // SetOldKeys(password);
   
   Keys[0] = 0xD3A3B879L;
@@ -56,41 +55,56 @@ void CData::SetPassword(const BYTE *password, UINT32 passwordLength)
   Keys[2] = 0x7515A235L;
   Keys[3] = 0xA4E7F123L;
   
-  BYTE Psw[256];
-  memset(Psw, 0, sizeof(Psw));
+  Byte psw[256];
+  memset(psw, 0, sizeof(psw));
   
-  memmove(Psw, password, passwordLength);
+  memmove(psw, password, passwordLength);
   
   memcpy(SubstTable, InitSubstTable, sizeof(SubstTable));
-  for (UINT32 j = 0; j < 256; j++)
-    for (UINT32 i = 0; i < passwordLength; i += 2)
+  for (UInt32 j = 0; j < 256; j++)
+    for (UInt32 i = 0; i < passwordLength; i += 2)
     {
-      UINT32 n2 = (BYTE)CCRC::Table[(Psw[i + 1] + j) & 0xFF];
-      UINT32 n1 = (BYTE)CCRC::Table[(Psw[i] - j) & 0xFF];
-      for (UINT32 k = 1; (n1 & 0xFF) != n2; n1++, k++)
+      UInt32 n2 = (Byte)CCRC::Table[(psw[i + 1] + j) & 0xFF];
+      UInt32 n1 = (Byte)CCRC::Table[(psw[i] - j) & 0xFF];
+      for (UInt32 k = 1; (n1 & 0xFF) != n2; n1++, k++)
         Swap(&SubstTable[n1 & 0xFF], &SubstTable[(n1 + i + k) & 0xFF]);
     }
-  for (UINT32 i = 0; i < passwordLength; i+= 16)
-    EncryptBlock(&Psw[i]);
+  for (UInt32 i = 0; i < passwordLength; i+= 16)
+    EncryptBlock(&psw[i]);
 }
 
-void CData::EncryptBlock(BYTE *Buf)
+static inline UInt32 GetUInt32FromMemLE(const Byte *p)
 {
-  UINT32 A, B, C, D, T, TA, TB;
+  return p[0] | (((UInt32)p[1]) << 8) | (((UInt32)p[2]) << 16) | (((UInt32)p[3]) << 24);
+}
 
-  UINT32 *BufPtr;
-  BufPtr = (UINT32 *)Buf;
+static inline void WriteUInt32ToMemLE(UInt32 v, Byte *p)
+{
+  p[0] = (Byte)v;
+  p[1] = (Byte)(v >> 8);
+  p[2] = (Byte)(v >> 16);
+  p[3] = (Byte)(v >> 24);
+}
+
+void CData::CryptBlock(Byte *buf, bool encrypt)
+{
+  Byte inBuf[16];
+  UInt32 A, B, C, D, T, TA, TB;
+
+  A = GetUInt32FromMemLE(buf + 0) ^ Keys[0];
+  B = GetUInt32FromMemLE(buf + 4) ^ Keys[1];
+  C = GetUInt32FromMemLE(buf + 8) ^ Keys[2];
+  D = GetUInt32FromMemLE(buf + 12) ^ Keys[3];
+
+  if (!encrypt)
+    memcpy(inBuf, buf, sizeof(inBuf));
   
-  A = BufPtr[0] ^ Keys[0];
-  B = BufPtr[1] ^ Keys[1];
-  C = BufPtr[2] ^ Keys[2];
-  D = BufPtr[3] ^ Keys[3];
-
   for(int i = 0; i < kNumRounds; i++)
   {
-    T = ((C + rol(D, 11)) ^ Keys[i & 3]);
+    UInt32 key = Keys[(encrypt ? i : (kNumRounds - 1 - i)) & 3];
+    T = ((C + rol(D, 11)) ^ key);
     TA = A ^ SubstLong(T);
-    T=((D ^ rol(C, 17)) + Keys[i & 3]);
+    T = ((D ^ rol(C, 17)) + key);
     TB = B ^ SubstLong(T);
     A = C;
     B = D;
@@ -98,47 +112,13 @@ void CData::EncryptBlock(BYTE *Buf)
     D = TB;
   }
 
-  BufPtr[0] = C ^ Keys[0];
-  BufPtr[1] = D ^ Keys[1];
-  BufPtr[2] = A ^ Keys[2];
-  BufPtr[3] = B ^ Keys[3];
+  WriteUInt32ToMemLE(C ^ Keys[0], buf + 0);
+  WriteUInt32ToMemLE(D ^ Keys[1], buf + 4);
+  WriteUInt32ToMemLE(A ^ Keys[2], buf + 8);
+  WriteUInt32ToMemLE(B ^ Keys[3], buf + 12);
 
-  UpdateKeys(Buf);
+  UpdateKeys(encrypt ? buf : inBuf);
 }
 
-void CData::DecryptBlock(BYTE *Buf)
-{
-  BYTE InBuf[16];
-  UINT32 A, B, C, D, T, TA, TB;
-
-  UINT32 *BufPtr;
-  BufPtr = (UINT32 *)Buf;
-  
-  A = BufPtr[0] ^ Keys[0];
-  B = BufPtr[1] ^ Keys[1];
-  C = BufPtr[2] ^ Keys[2];
-  D = BufPtr[3] ^ Keys[3];
-
-  memcpy(InBuf, Buf, sizeof(InBuf));
-  
-  for(int i = kNumRounds - 1; i >= 0; i--)
-  {
-    T = ((C + rol(D, 11)) ^ Keys[i & 3]);
-    TA = A ^ SubstLong(T);
-    T = ((D ^ rol(C, 17)) + Keys[i & 3]);
-    TB = B ^ SubstLong(T);
-    A = C;
-    B = D;
-    C = TA;
-    D = TB;
-  }
-
-  BufPtr[0] = C ^ Keys[0];
-  BufPtr[1] = D ^ Keys[1];
-  BufPtr[2] = A ^ Keys[2];
-  BufPtr[3] = B ^ Keys[3];
-
-  UpdateKeys(InBuf);
-}
 
 }}

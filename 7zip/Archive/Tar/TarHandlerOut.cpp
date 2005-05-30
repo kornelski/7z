@@ -20,23 +20,23 @@ using namespace NTime;
 namespace NArchive {
 namespace NTar {
 
-STDMETHODIMP CHandler::GetFileTimeType(UINT32 *type)
+STDMETHODIMP CHandler::GetFileTimeType(UInt32 *type)
 {
   *type = NFileTimeType::kUnix;
   return S_OK;
 }
 
-STDMETHODIMP CHandler::UpdateItems(IOutStream *outStream, UINT32 numItems,
+STDMETHODIMP CHandler::UpdateItems(ISequentialOutStream *outStream, UInt32 numItems,
     IArchiveUpdateCallback *updateCallback)
 {
   COM_TRY_BEGIN
   CObjectVector<CUpdateItemInfo> updateItems;
-  for(UINT32 i = 0; i < numItems; i++)
+  for(UInt32 i = 0; i < numItems; i++)
   {
     CUpdateItemInfo updateItem;
-    INT32 newData;
-    INT32 newProperties;
-    UINT32 indexInArchive;
+    Int32 newData;
+    Int32 newProperties;
+    UInt32 indexInArchive;
     if (!updateCallback)
       return E_FAIL;
     RINOK(updateCallback->GetUpdateItemInfo(i,
@@ -51,7 +51,7 @@ STDMETHODIMP CHandler::UpdateItems(IOutStream *outStream, UINT32 numItems,
       FILETIME utcTime;
       UString name;
       bool isDirectoryStatusDefined;
-      UINT32 attributes;
+      UInt32 attributes;
       {
         NCOM::CPropVariant propVariant;
         RINOK(updateCallback->GetProperty(i, kpidAttributes, &propVariant));
@@ -98,18 +98,19 @@ STDMETHODIMP CHandler::UpdateItems(IOutStream *outStream, UINT32 numItems,
         updateItem.IsDirectory = ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0);
       if (updateItem.IsDirectory)
         updateItem.Name += '/';
+
       if(!FileTimeToUnixTime(utcTime, updateItem.Time))
         return E_INVALIDARG;
     }
     if (IntToBool(newData))
     {
-      UINT64 size;
+      UInt64 size;
       {
         NCOM::CPropVariant propVariant;
         RINOK(updateCallback->GetProperty(i, kpidSize, &propVariant));
         if (propVariant.vt != VT_UI8)
           return E_INVALIDARG;
-        size = *(UINT64 *)(&propVariant.uhVal);
+        size = propVariant.uhVal.QuadPart;
       }
       updateItem.Size = size;
     }

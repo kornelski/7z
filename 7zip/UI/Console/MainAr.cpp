@@ -4,28 +4,34 @@
 
 // #include <locale.h>
 
-#include "Windows/COM.h"
 #include "Windows/Error.h"
 
 #include "Common/StdOutStream.h"
 #include "Common/NewHandler.h"
+#include "Common/Exception.h"
 #include "Common/StringConvert.h"
 
+#include "../Common/ExitCode.h"
 #include "ConsoleClose.h"
-#include "ArError.h"
 
 using namespace NWindows;
 
-// extern int Main2(int numArguments, const char *arguments[]);
-extern int Main2();
+CStdOutStream *g_StdStream = 0;
+
+extern int Main2(
+  #ifndef _WIN32  
+  int numArguments, const char *arguments[]
+  #endif
+);
 
 static const char *kExceptionErrorMessage = "\n\nError:\n";
 static const char *kUserBreak  = "\nBreak signaled\n";
 
-static const char *kMemoryExceptionMessage = "\n\nMemory Error! Can't allocate!\n";
+static const char *kMemoryExceptionMessage = "\n\nERROR: Can't allocate required memory!\n";
 static const char *kUnknownExceptionMessage = "\n\nUnknown Error\n";
 static const char *kInternalExceptionMessage = "\n\nInternal Error #";
 
+#ifdef UNICODE
 static inline bool IsItWindowsNT()
 {
   OSVERSIONINFO versionInfo;
@@ -34,81 +40,100 @@ static inline bool IsItWindowsNT()
     return false;
   return (versionInfo.dwPlatformId == VER_PLATFORM_WIN32_NT);
 }
+#endif
 
-int __cdecl main()
-// int __cdecl main(int numArguments, const char *arguments[])
+int 
+#ifdef _MSC_VER
+__cdecl 
+#endif
+main
+(
+#ifndef _WIN32  
+int numArguments, const char *arguments[]
+#endif
+)
 {
+  g_StdStream = &g_StdOut;
   #ifdef UNICODE
   if (!IsItWindowsNT())
   {
-    g_StdOut << "This program requires Windows NT/2000/XP";
+    (*g_StdStream) << "This program requires Windows NT/2000/XP/2003";
     return NExitCode::kFatalError;
   }
   #endif
   // setlocale(LC_COLLATE, ".OCP");
-  int result=1;
-  NCOM::CComInitializer comInitializer;
+  NConsoleClose::CCtrlHandlerSetter ctrlHandlerSetter;
   try
   {
-    NConsoleClose::CCtrlHandlerSetter aCtrlHandlerSetter;
-    try
-    {
-      // result = Main2(numArguments, arguments);
-      result = Main2();
-    }
-    catch(const NConsoleClose::CCtrlBreakException &)
-    {
-      g_StdOut << endl << kUserBreak;
-      return (NExitCode::kUserBreak);
-    }
+    return Main2(
+#ifndef _WIN32
+      numArguments, arguments
+#endif
+    );
   }
-  catch(const CNewException)
+  catch(const CNewException &)
   {
-    g_StdOut << kMemoryExceptionMessage;
+    (*g_StdStream) << kMemoryExceptionMessage;
     return (NExitCode::kMemoryError);
   }
-  catch(const CSystemException &e)
+  catch(const NConsoleClose::CCtrlBreakException &)
   {
-    g_StdOut << "System Error: " << (UINT64)(e.ErrorCode);
-    return (NExitCode::kFatalError);
+    (*g_StdStream) << endl << kUserBreak;
+    return (NExitCode::kUserBreak);
   }
-  catch(NExitCode::EEnum &aExitCode)
+  catch(const CSystemException &systemError)
   {
-    g_StdOut << kInternalExceptionMessage << aExitCode << endl;
-    return (aExitCode);
-  }
-  catch(const NExitCode::CSystemError &systemError)
-  {
+    if (systemError.ErrorCode == E_OUTOFMEMORY)
+    {
+      (*g_StdStream) << kMemoryExceptionMessage;
+      return (NExitCode::kMemoryError);
+    }
+    if (systemError.ErrorCode == E_ABORT)
+    {
+      (*g_StdStream) << endl << kUserBreak;
+      return (NExitCode::kUserBreak);
+    }
     UString message;
-    NError::MyFormatMessage(systemError.ErrorValue, message);
-    g_StdOut << endl << endl << "System error:" << endl << 
+    NError::MyFormatMessage(systemError.ErrorCode, message);
+    (*g_StdStream) << endl << endl << "System error:" << endl << 
         message << endl;
     return (NExitCode::kFatalError);
   }
+  catch(NExitCode::EEnum &exitCode)
+  {
+    (*g_StdStream) << kInternalExceptionMessage << exitCode << endl;
+    return (exitCode);
+  }
+  /*
   catch(const NExitCode::CMultipleErrors &multipleErrors)
   {
-    g_StdOut << endl << multipleErrors.NumErrors << " errors" << endl;
+    (*g_StdStream) << endl << multipleErrors.NumErrors << " errors" << endl;
     return (NExitCode::kFatalError);
   }
+  */
   catch(const UString &s)
   {
-    g_StdOut << kExceptionErrorMessage << s << endl;
+    (*g_StdStream) << kExceptionErrorMessage << s << endl;
+    return (NExitCode::kFatalError);
+  }
+  catch(const AString &s)
+  {
+    (*g_StdStream) << kExceptionErrorMessage << s << endl;
     return (NExitCode::kFatalError);
   }
   catch(const char *s)
   {
-    g_StdOut << kExceptionErrorMessage << s << endl;
+    (*g_StdStream) << kExceptionErrorMessage << s << endl;
     return (NExitCode::kFatalError);
   }
   catch(int t)
   {
-    g_StdOut << kInternalExceptionMessage << t << endl;
+    (*g_StdStream) << kInternalExceptionMessage << t << endl;
     return (NExitCode::kFatalError);
   }
   catch(...)
   {
-    g_StdOut << kUnknownExceptionMessage;
+    (*g_StdStream) << kUnknownExceptionMessage;
     return (NExitCode::kFatalError);
   }
-  return result;
 }

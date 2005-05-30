@@ -1,18 +1,15 @@
 // Common/IntToString.h
 
-#pragma once
-
 #ifndef __COMMON_INTTOSTRING_H
 #define __COMMON_INTTOSTRING_H
 
-#include "types.h"
+#include <stddef.h>
+#include "Types.h"
 
-void ConvertUINT64ToString(UINT64 value, char *s);
-void ConvertUINT64ToString(UINT64 value, wchar_t *s);
+void ConvertUInt64ToString(UInt64 value, char *s, UInt32 base = 10);
+void ConvertUInt64ToString(UInt64 value, wchar_t *s);
 
-void ConvertINT64ToString(INT64 value, char *s);
-void ConvertINT64ToString(INT64 value, wchar_t *s);
+void ConvertInt64ToString(Int64 value, char *s);
+void ConvertInt64ToString(Int64 value, wchar_t *s);
 
 #endif
-
-

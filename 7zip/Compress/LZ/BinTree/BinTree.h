@@ -1,116 +1,55 @@
 // BinTree.h
 
-// #pragma once
-
-// #ifndef __BINTREE_H
-// #define __BINTREE_H
-
 #include "../LZInWindow.h"
-// #include "Common/Types.h"
-// #include "Windows/Defs.h"
+#include "../IMatchFinder.h"
  
 namespace BT_NAMESPACE {
 
-// #define __USE_3_BYTES
+typedef UInt32 CIndex;
+const UInt32 kMaxValForNormalize = (UInt32(1) << 31) - 1;
 
-#ifdef __USE_3_BYTES
-
-#pragma pack(push, PragmaBinTree, 1)
-
-struct CIndex
+class CMatchFinderBinTree: 
+  public IMatchFinder,
+  public IMatchFinderSetCallback,
+  public CLZInWindow,
+  public CMyUnknownImp
 {
-  BYTE Data[3];
-  CIndex(){}
-  CIndex(UINT32 value)
-  { 
-    Data[0] = value & 0xFF;
-    Data[1] = (value >> 8) & 0xFF;
-    Data[2] = (value >> 16) & 0xFF;
-  }
-  operator UINT32() const { return (*((const UINT32 *)Data)) & 0xFFFFFF; }
-};
-const UINT32 kMaxValForNormalize = CIndex(-1);
-
-#pragma pack(pop, PragmaBinTree)
-
-#else
-
-typedef UINT32 CIndex;
-const UINT32 kMaxValForNormalize = (UINT32(1) << 31) - 1;
-
-#endif
-
-
-
-// #define HASH_ARRAY_2
-
-// #ifdef HASH_ARRAY_2
-
-// #define HASH_ARRAY_3
-
-// #else
-
-// #define HASH_ZIP
-
-// #endif
-
-#pragma pack(push, PragmaBinTreePair, 1)
-// #pragma pack(push, 1)
-
-struct CPair
-{
-  CIndex Left;
-  CIndex Right;
-};
-
-// #pragma pack(pop)
-#pragma pack(pop, PragmaBinTreePair)
-
-class CInTree: public CLZInWindow
-{
-  UINT32 _cyclicBufferPos;
-  UINT32 _cyclicBufferSize;
-  UINT32 _historySize;
-  UINT32 _matchMaxLen;
-
+  UInt32 _cyclicBufferPos;
+  UInt32 _cyclicBufferSize; // it must be historySize + 1
+  UInt32 _matchMaxLen;
   CIndex *_hash;
-  
-  #ifdef HASH_ARRAY_2
-  CIndex *_hash2;
-  #ifdef HASH_ARRAY_3
-  CIndex *_hash3;
-  #endif
-  #endif
-  
-  CPair *_son;
+  UInt32 _cutValue;
 
-  UINT32 _cutValue;
+  CMyComPtr<IMatchFinderCallback> m_Callback;
 
-  void NormalizeLinks(CIndex *array, UINT32 numItems, UINT32 subValue);
   void Normalize();
+  void FreeThisClassMemory();
   void FreeMemory();
 
+  MY_UNKNOWN_IMP1(IMatchFinderSetCallback)
+
+  STDMETHOD(Init)(ISequentialInStream *inStream);
+  STDMETHOD_(void, ReleaseStream)();
+  STDMETHOD(MovePos)();
+  STDMETHOD_(Byte, GetIndexByte)(Int32 index);
+  STDMETHOD_(UInt32, GetMatchLen)(Int32 index, UInt32 back, UInt32 limit);
+  STDMETHOD_(UInt32, GetNumAvailableBytes)();
+  STDMETHOD_(const Byte *, GetPointerToCurrentPos)();
+  STDMETHOD(Create)(UInt32 historySize, UInt32 keepAddBufferBefore, 
+      UInt32 matchMaxLen, UInt32 keepAddBufferAfter);
+  STDMETHOD_(UInt32, GetLongestMatch)(UInt32 *distances);
+  STDMETHOD_(void, DummyLongestMatch)();
+
+  // IMatchFinderSetCallback
+  STDMETHOD(SetCallback)(IMatchFinderCallback *callback);
+
+  virtual void BeforeMoveBlock();
+  virtual void AfterMoveBlock();
+
 public:
-  CInTree();
-  ~CInTree();
-  HRESULT Create(UINT32 sizeHistory, UINT32 keepAddBufferBefore, UINT32 matchMaxLen, 
-      UINT32 keepAddBufferAfter, UINT32 sizeReserv = (1<<17));
-	HRESULT Init(ISequentialInStream *stream);
-  void SetCutValue(UINT32 cutValue) { _cutValue = cutValue; }
-  UINT32 GetLongestMatch(UINT32 *distances);
-  void DummyLongestMatch();
-  HRESULT MovePos()
-  {
-    _cyclicBufferPos++;
-    if (_cyclicBufferPos >= _cyclicBufferSize)
-      _cyclicBufferPos = 0;
-    RINOK(CLZInWindow::MovePos());
-    if (_pos == kMaxValForNormalize)
-      Normalize();
-    return S_OK;
-  }
+  CMatchFinderBinTree();
+  virtual ~CMatchFinderBinTree();
+  void SetCutValue(UInt32 cutValue) { _cutValue = cutValue; }
 };
 
 }
-
-// #endif

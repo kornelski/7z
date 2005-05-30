@@ -11,9 +11,9 @@
 namespace NArchive {
 namespace NGZip {
  
-HRESULT CInArchive::ReadBytes(IInStream *inStream, void *data, UINT32 size)
+HRESULT CInArchive::ReadBytes(ISequentialInStream *inStream, void *data, UInt32 size)
 {
-  UINT32 realProcessedSize;
+  UInt32 realProcessedSize;
   RINOK(inStream->Read(data, size, &realProcessedSize));
   m_Position += realProcessedSize;
   if(realProcessedSize != size)
@@ -21,112 +21,99 @@ HRESULT CInArchive::ReadBytes(IInStream *inStream, void *data, UINT32 size)
   return S_OK;
 }
 
-HRESULT CInArchive::UpdateCRCBytes(IInStream *inStream, 
-    UINT32 numBytesToSkeep, CCRC &crc)
+HRESULT CInArchive::ReadByte(ISequentialInStream *inStream, Byte &value)
 {
-  while (numBytesToSkeep > 0)
+  return ReadBytes(inStream, &value, 1);
+}
+
+HRESULT CInArchive::ReadUInt16(ISequentialInStream *inStream, UInt16 &value)
+{
+  value = 0;
+  for (int i = 0; i < 2; i++)
   {
-    const UINT32 kBufferSize = (1 << 12);
-    BYTE buffer[kBufferSize];
-    UINT32 currentSize = MyMin(numBytesToSkeep, kBufferSize);
-    RINOK(ReadBytes(inStream, buffer, currentSize));
-    crc.Update(buffer, currentSize);
-    numBytesToSkeep -= currentSize;
+    Byte b;
+    RINOK(ReadByte(inStream, b));
+    value |= (UInt16(b) << (8 * i));
   }
   return S_OK;
 }
 
-HRESULT CInArchive::ReadZeroTerminatedString(IInStream *inStream, AString &resString)
+HRESULT CInArchive::ReadUInt32(ISequentialInStream *inStream, UInt32 &value)
+{
+  value = 0;
+  for (int i = 0; i < 4; i++)
+  {
+    Byte b;
+    RINOK(ReadByte(inStream, b));
+    value |= (UInt32(b) << (8 * i));
+  }
+  return S_OK;
+}
+
+HRESULT CInArchive::ReadZeroTerminatedString(ISequentialInStream *inStream, AString &resString, CCRC &crc)
 {
   resString.Empty();
   while(true)
   {
-    char c;
-    RINOK(ReadBytes(inStream, &c, sizeof(c)));
+    Byte c;
+    RINOK(ReadByte(inStream, c));
+    crc.UpdateByte(c);
     if (c == 0)
       return S_OK;
-    resString += c;
+    resString += char(c);
   }
 }
 
-HRESULT CInArchive::ReadHeader(IInStream *inStream, CItemEx &item)
+HRESULT CInArchive::ReadHeader(ISequentialInStream *inStream, CItem &item)
 {
-  RINOK(inStream->Seek(0, STREAM_SEEK_CUR, &m_StreamStartPosition));
+  item.Clear();
+  m_Position = 0;
 
-  m_Position = m_StreamStartPosition;
-  NFileHeader::CBlock fileHeader;
-
-  RINOK(ReadBytes(inStream, &fileHeader, sizeof(fileHeader)));
-
-  if (fileHeader.Id != kSignature)
+  UInt16 signature;
+  RINOK(ReadUInt16(inStream, signature));
+  if (signature != kSignature)
     return S_FALSE;
-
-  item.CompressionMethod = fileHeader.CompressionMethod;
-  item.Flags = fileHeader.Flags;
-  item.Time = fileHeader.Time;
-  item.ExtraFlags = fileHeader.ExtraFlags;
-  item.HostOS = fileHeader.HostOS;
-
+  RINOK(ReadByte(inStream, item.CompressionMethod));
+  RINOK(ReadByte(inStream, item.Flags));
+  RINOK(ReadUInt32(inStream, item.Time));
+  RINOK(ReadByte(inStream, item.ExtraFlags));
+  RINOK(ReadByte(inStream, item.HostOS));
+  
   CCRC crc;
-  crc.Update(&fileHeader, sizeof(fileHeader));
+  crc.Update(&signature, 2);
+  crc.UpdateByte(item.CompressionMethod);
+  crc.UpdateByte(item.Flags);
+  crc.UpdateUInt32(item.Time);
+  crc.UpdateByte(item.ExtraFlags);
+  crc.UpdateByte(item.HostOS);
+
   if (item.ExtraFieldIsPresent())
   {
-    item.ExtraPosition = m_Position;
-    RINOK(ReadBytes(inStream, &item.ExtraFieldSize, 
-        sizeof(item.ExtraFieldSize)));
-    crc.Update(&item.ExtraFieldSize, sizeof(item.ExtraFieldSize));
-    RINOK(UpdateCRCBytes(inStream, item.ExtraFieldSize, crc));
+    UInt16 extraSize;
+    RINOK(ReadUInt16(inStream, extraSize));
+    crc.UpdateUInt16(extraSize);
+    item.Extra.SetCapacity(extraSize);
+    RINOK(ReadBytes(inStream, item.Extra, extraSize));
+    crc.Update(item.Extra, extraSize);
   }
-  item.Name.Empty();
   if (item.NameIsPresent())
-    RINOK(ReadZeroTerminatedString(inStream, item.Name));
-  AString comment;
+    RINOK(ReadZeroTerminatedString(inStream, item.Name, crc));
   if (item.CommentIsPresent())
-  {
-    item.CommentPosition = m_Position;
-    RINOK(ReadZeroTerminatedString(inStream, comment));
-    item.CommentSize = comment.Length() + 1;
-  }
+    RINOK(ReadZeroTerminatedString(inStream, item.Comment, crc));
   if (item.HeaderCRCIsPresent())
   {
-    UINT16 headerCRC;
-    RINOK(ReadBytes(inStream, &headerCRC, sizeof(headerCRC)));
-    if (item.NameIsPresent())
-    {
-      crc.Update((const char *)item.Name, item.Name.Length());
-      BYTE zeroByte = 0;;
-      crc.Update(&zeroByte, sizeof(zeroByte));
-    }
-    if (item.CommentIsPresent())
-    {
-      crc.Update((const char *)comment, comment.Length());
-      BYTE zeroByte = 0;;
-      crc.Update(&zeroByte, sizeof(zeroByte));
-    }
-    if ((UINT16)crc.GetDigest() != headerCRC)
+    UInt16 headerCRC;
+    RINOK(ReadUInt16(inStream, headerCRC));
+    if ((UInt16)crc.GetDigest() != headerCRC)
       return S_FALSE;
   }
-
-  item.DataPosition = m_Position;
-
-  item.UnPackSize32 = 0;
-  item.PackSize = 0;
-
-  /*
-  UINT64 newPosition;
-  RINOK(inStream->Seek(-8, STREAM_SEEK_END, &newPosition));
-  item.PackSize = newPosition - item.DataPosition;
-
-  RINOK(ReadBytes(inStream, &item.FileCRC, sizeof(item.FileCRC)));
-  RINOK(ReadBytes(inStream, &item.UnPackSize32, sizeof(item.UnPackSize32)));
-  */
   return S_OK;
 }
 
-HRESULT CInArchive::ReadPostInfo(IInStream *inStream, UINT32 &crc, UINT32 &unpackSize32)
+HRESULT CInArchive::ReadPostHeader(ISequentialInStream *inStream, CItem &item)
 {
-  RINOK(ReadBytes(inStream, &crc, sizeof(crc)));
-  return ReadBytes(inStream, &unpackSize32, sizeof(unpackSize32));
+  RINOK(ReadUInt32(inStream, item.FileCRC));
+  return ReadUInt32(inStream, item.UnPackSize32);
 }
 
 }}

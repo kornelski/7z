@@ -5,28 +5,54 @@
 #include "LangUtils.h"
 #include "Common/StringConvert.h"
 #include "Windows/ResourceString.h"
+#include "Windows/Synchronization.h"
 #include "Windows/Window.h"
 #include "RegistryUtils.h"
+#include "ProgramLocation.h"
 
-CLang g_Lang;
-CSysString g_LangPath;
+using namespace NWindows;
+
+static CLang g_Lang;
+CSysString g_LangID;
 
 void ReloadLang()
 {
-  ReadRegLang(g_LangPath);
+  ReadRegLang(g_LangID);
   g_Lang.Clear();
-  if (!g_LangPath.IsEmpty())
-    g_Lang.Open(g_LangPath);
+  if (!g_LangID.IsEmpty())
+  {
+    CSysString langPath = g_LangID;
+    if (langPath.Find('\\') < 0)
+    {
+      if (langPath.Find('.') < 0)
+        langPath += TEXT(".txt");
+      UString folderPath;
+      if (GetProgramFolderPath(folderPath))
+        langPath = GetSystemString(folderPath) + CSysString(TEXT("Lang\\")) + langPath;
+    }
+    g_Lang.Open(langPath);
+  }
 }
 
+static bool g_Loaded = false;
+static NSynchronization::CCriticalSection g_CriticalSection;
+
+void LoadLangOneTime()
+{
+  NSynchronization::CCriticalSectionLock lock(g_CriticalSection);
+  if (g_Loaded)
+    return;
+  g_Loaded = true;
+  ReloadLang();
+}
+
+/*
 class CLangLoader
 {
 public:
-  CLangLoader()
-  {
-    ReloadLang();
-  }
+  CLangLoader() { ReloadLang(); }
 } g_LangLoader;
+*/
 
 void LangSetDlgItemsText(HWND dialogWindow, CIDLangPair *idLangPairs, int numItems)
 {
@@ -42,14 +68,14 @@ void LangSetDlgItemsText(HWND dialogWindow, CIDLangPair *idLangPairs, int numIte
   }
 }
 
-void LangSetWindowText(HWND window, UINT32 langID)
+void LangSetWindowText(HWND window, UInt32 langID)
 {
   UString message;
   if (g_Lang.GetMessage(langID, message))
     SetWindowText(window, GetSystemString(message));
 }
 
-UString LangLoadString(UINT32 langID)
+UString LangLoadString(UInt32 langID)
 {
   UString message;
   if (g_Lang.GetMessage(langID, message))
@@ -57,7 +83,7 @@ UString LangLoadString(UINT32 langID)
   return UString();
 }
 
-CSysString LangLoadString(UINT resourceID, UINT32 langID)
+CSysString LangLoadString(UINT resourceID, UInt32 langID)
 {
   UString message;
   if (g_Lang.GetMessage(langID, message))
@@ -65,7 +91,7 @@ CSysString LangLoadString(UINT resourceID, UINT32 langID)
   return NWindows::MyLoadString(resourceID);
 }
 
-UString LangLoadStringW(UINT resourceID, UINT32 langID)
+UString LangLoadStringW(UINT resourceID, UInt32 langID)
 {
   UString message;
   if (g_Lang.GetMessage(langID, message))

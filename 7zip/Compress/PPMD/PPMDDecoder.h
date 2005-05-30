@@ -1,11 +1,9 @@
 // Compress/PPM/PPMDDecoder.h
 
-#pragma once
+#ifndef __COMPRESS_PPMD_DECODER_H
+#define __COMPRESS_PPMD_DECODER_H
 
-#ifndef __COMPRESS_PPM_PPMD_DECODER_H
-#define __COMPRESS_PPM_PPMD_DECODER_H
-
-#include "Common/MyCom.h"
+#include "../../../Common/MyCom.h"
 
 #include "../../ICoder.h"
 #include "../../Common/OutBuffer.h"
@@ -18,7 +16,7 @@ namespace NPPMD {
 
 class CDecoder : 
   public ICompressCoder,
-  public ICompressSetDecoderProperties,
+  public ICompressSetDecoderProperties2,
   public CMyUnknownImp
 {
   NRangeCoder::CDecoder _rangeDecoder;
@@ -27,39 +25,32 @@ class CDecoder :
 
   CDecodeInfo _info;
 
-  BYTE _order;
-  UINT32 _usedMemorySize;
+  Byte _order;
+  UInt32 _usedMemorySize;
 
 public:
 
-  MY_UNKNOWN_IMP1(ICompressSetDecoderProperties)
+  MY_UNKNOWN_IMP1(ICompressSetDecoderProperties2)
 
-  /*
   void ReleaseStreams()
   {
     _rangeDecoder.ReleaseStream();
     _outStream.ReleaseStream();
   }
-  */
 
-  // STDMETHOD(Code)(UINT32 aNumBytes, UINT32 &aProcessedBytes);
-  HRESULT Flush()
-    { return _outStream.Flush(); }
-
+  HRESULT Flush() { return _outStream.Flush(); }
 
   STDMETHOD(CodeReal)(ISequentialInStream *inStream,
       ISequentialOutStream *outStream, 
-      const UINT64 *inSize, const UINT64 *outSize,
+      const UInt64 *inSize, const UInt64 *outSize,
       ICompressProgressInfo *progress);
 
   STDMETHOD(Code)(ISequentialInStream *inStream,
-      ISequentialOutStream *outStream, const UINT64 *inSize, const UINT64 *outSize,
+      ISequentialOutStream *outStream, const UInt64 *inSize, const UInt64 *outSize,
       ICompressProgressInfo *progress);
 
 
-  // ICompressSetDecoderProperties
-  STDMETHOD(SetDecoderProperties)(ISequentialInStream *inStream);
-
+  STDMETHOD(SetDecoderProperties2)(const Byte *data, UInt32 size);
 };
 
 }}

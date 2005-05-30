@@ -199,7 +199,6 @@ void CPanel::InsertColumn(int index)
   _listView.InsertColumn(index, &column);
 }
 
-
 void CPanel::RefreshListCtrl()
 {
   RefreshListCtrl(UString(), 0, UStringVector());
@@ -211,13 +210,14 @@ int CALLBACK CompareItems(LPARAM lParam1, LPARAM lParam2, LPARAM lpData);
 void CPanel::GetSelectedNames(UStringVector &selectedNames)
 {
   selectedNames.Clear();
-  /*
+
   CRecordVector<UINT32> indices;
-  GetSelectedItemsIndexes(indices);
+  GetSelectedItemsIndices(indices);
   selectedNames.Reserve(indices.Size());
   for (int  i = 0; i < indices.Size(); i++)
     selectedNames.Add(GetItemName(indices[i]));
-  */
+
+  /*
   for (int i = 0; i < _listView.GetItemCount(); i++)
   {
     const int kSize = 1024;
@@ -236,21 +236,21 @@ void CPanel::GetSelectedNames(UStringVector &selectedNames)
     if (_selectedStatusVector[realIndex])
       selectedNames.Add(GetUnicodeString(item.pszText));
   }
+  */
   selectedNames.Sort();
 }
 
-void CPanel::RefreshListCtrlSaveFocused()
+void CPanel::SaveSelectedState(CSelectedState &s)
 {
-  int focusedItem = _listView.GetFocusedItem();
-  UString focusedName;
-  if (focusedItem >= 0)
+  s.FocusedName.Empty();
+  s.SelectedNames.Clear();
+  s.FocusedItem = _listView.GetFocusedItem();
+  if (s.FocusedItem >= 0)
   {
+    int realIndex = GetRealItemIndex(s.FocusedItem);
+    if (realIndex != -1)
+      s.FocusedName = GetItemName(realIndex);
     /*
-    LPARAM param;
-    if (_listView.GetItemParam(focusedItem, param))
-      // focusedName = m_Files[param].Name;
-      focusedName = GetItemName(param);
-    */
     const int kSize = 1024;
     TCHAR name[kSize + 1];
     LVITEM item;
@@ -261,10 +261,21 @@ void CPanel::RefreshListCtrlSaveFocused()
     item.mask = LVIF_TEXT;
     if (_listView.GetItem(&item))
       focusedName = GetUnicodeString(item.pszText);
+    */
   }
-  UStringVector selectedNames;
-  GetSelectedNames(selectedNames);
-  RefreshListCtrl(focusedName, focusedItem, selectedNames);
+  GetSelectedNames(s.SelectedNames);
+}
+
+void CPanel::RefreshListCtrl(const CSelectedState &s)
+{
+  RefreshListCtrl(s.FocusedName, s.FocusedItem, s.SelectedNames);
+}
+
+void CPanel::RefreshListCtrlSaveFocused()
+{
+  CSelectedState state;
+  SaveSelectedState(state);
+  RefreshListCtrl(state);
 }
 
 void CPanel::RefreshListCtrl(const UString &focusedName, int focusedPos,
@@ -378,8 +389,28 @@ void CPanel::RefreshListCtrl(const UString &focusedName, int focusedPos,
     item.lParam = i;
     
     const int kMaxNameSize = MAX_PATH * 2;
-    TCHAR string[kMaxNameSize];
-    lstrcpyn(string, GetSystemString(itemName), kMaxNameSize);
+    TCHAR string[kMaxNameSize + 1];
+    if (itemName.Find(L"     ") >= 0)
+    {
+      UString correctedName;
+      int pos = 0;
+      while (true)
+      {
+        int posNew = itemName.Find(L"     ", pos);
+        if (posNew < 0)
+        {
+          correctedName += itemName.Mid(pos);
+          break;
+        }
+        correctedName += itemName.Mid(pos, posNew - pos);
+        correctedName += L" ... ";
+        pos = posNew;
+        while (itemName[++pos] == ' ');
+      }
+      lstrcpyn(string, GetSystemString(correctedName), kMaxNameSize);
+    }
+    else
+      lstrcpyn(string, GetSystemString(itemName), kMaxNameSize);
     item.pszText = string;
 
     NCOM::CPropVariant propVariant;
@@ -582,7 +613,7 @@ UINT64 CPanel::GetItemSize(int itemIndex) const
     throw 2723400;
   if (propVariant.vt == VT_EMPTY)
     return 0;
-  return ConvertPropVariantToUINT64(propVariant);
+  return ConvertPropVariantToUInt64(propVariant);
 }
 
 void CPanel::ReadListViewInfo()

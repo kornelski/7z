@@ -43,7 +43,7 @@ RSC=rc.exe
 # PROP Ignore_Export_Lib 1
 # PROP Target_Dir ""
 # ADD BASE CPP /nologo /MT /W3 /GX /O2 /D "WIN32" /D "NDEBUG" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "LZMA_EXPORTS" /YX /FD /c
-# ADD CPP /nologo /Gz /MD /W3 /GX /O1 /I "../../../" /D "NDEBUG" /D "WIN32" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "LZMA_EXPORTS" /D "COMPRESS_MF_BT" /D "COMPRESS_MF_PAT" /D "COMPRESS_MF_HC" /D "COMPRESS_MF_MT" /Yu"StdAfx.h" /FD /c
+# ADD CPP /nologo /Gz /MD /W3 /GX /O1 /I "../../../" /D "NDEBUG" /D "WIN32" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "LZMA_EXPORTS" /D "COMPRESS_MF_MT" /Yu"StdAfx.h" /FD /c
 # ADD BASE MTL /nologo /D "NDEBUG" /mktyplib203 /win32
 # ADD MTL /nologo /D "NDEBUG" /mktyplib203 /win32
 # ADD BASE RSC /l 0x419 /d "NDEBUG"
@@ -70,7 +70,7 @@ LINK32=link.exe
 # PROP Ignore_Export_Lib 1
 # PROP Target_Dir ""
 # ADD BASE CPP /nologo /MTd /W3 /Gm /GX /ZI /Od /D "WIN32" /D "_DEBUG" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "LZMA_EXPORTS" /YX /FD /GZ /c
-# ADD CPP /nologo /Gz /MTd /W3 /Gm /GX /ZI /Od /I "../../../" /D "_DEBUG" /D "WIN32" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "LZMA_EXPORTS" /D "COMPRESS_MF_BT" /D "COMPRESS_MF_PAT" /D "COMPRESS_MF_HC" /D "COMPRESS_MF_MT" /Yu"StdAfx.h" /FD /GZ /c
+# ADD CPP /nologo /Gz /MTd /W3 /Gm /GX /ZI /Od /I "../../../" /D "_DEBUG" /D "WIN32" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "LZMA_EXPORTS" /D "COMPRESS_MF_MT" /Yu"StdAfx.h" /FD /GZ /c
 # ADD BASE MTL /nologo /D "_DEBUG" /mktyplib203 /win32
 # ADD MTL /nologo /D "_DEBUG" /mktyplib203 /win32
 # ADD BASE RSC /l 0x419 /d "_DEBUG"
@@ -170,10 +170,6 @@ SOURCE=..\MatchFinders\IMatchFinder.h
 # End Source File
 # Begin Source File
 
-SOURCE=..\..\IMyUnknown.h
-# End Source File
-# Begin Source File
-
 SOURCE=..\..\IStream.h
 # End Source File
 # End Group
@@ -261,14 +257,6 @@ SOURCE=..\LZ\BinTree\BinTree4b.h
 
 SOURCE=..\LZ\BinTree\BinTreeMain.h
 # End Source File
-# Begin Source File
-
-SOURCE=..\LZ\BinTree\BinTreeMF.h
-# End Source File
-# Begin Source File
-
-SOURCE=..\LZ\BinTree\BinTreeMFMain.h
-# End Source File
 # End Group
 # Begin Group "HC"
 
@@ -296,14 +284,6 @@ SOURCE=..\LZ\HashChain\HC4b.h
 # Begin Source File
 
 SOURCE=..\LZ\HashChain\HCMain.h
-# End Source File
-# Begin Source File
-
-SOURCE=..\LZ\HashChain\HCMF.h
-# End Source File
-# Begin Source File
-
-SOURCE=..\LZ\HashChain\HCMFMain.h
 # End Source File
 # End Group
 # Begin Source File
@@ -340,6 +320,14 @@ SOURCE=..\..\..\Common\AlignedBuffer.h
 # End Source File
 # Begin Source File
 
+SOURCE=..\..\..\Common\Alloc.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\..\Common\Alloc.h
+# End Source File
+# Begin Source File
+
 SOURCE=..\..\..\Common\ComTry.h
 # End Source File
 # Begin Source File
@@ -364,6 +352,14 @@ SOURCE=..\..\..\Common\MyCom.h
 # End Source File
 # Begin Source File
 
+SOURCE=..\..\..\Common\MyUnknown.h
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\..\Common\MyWindows.h
+# End Source File
+# Begin Source File
+
 SOURCE=..\..\..\Common\NewHandler.cpp
 # End Source File
 # Begin Source File
@@ -376,11 +372,19 @@ SOURCE=..\..\..\Common\NewHandler.h
 # PROP Default_Filter ""
 # Begin Source File
 
+SOURCE=..\..\..\Windows\Handle.h
+# End Source File
+# Begin Source File
+
 SOURCE=..\..\..\Windows\Synchronization.cpp
 # End Source File
 # Begin Source File
 
 SOURCE=..\..\..\Windows\Synchronization.h
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\..\Windows\Thread.h
 # End Source File
 # End Group
 # Begin Source File
@@ -422,42 +426,6 @@ SOURCE=.\LZMAEncoder.cpp
 # Begin Source File
 
 SOURCE=.\LZMAEncoder.h
-# End Source File
-# Begin Source File
-
-SOURCE=.\LZMALen.cpp
-
-!IF  "$(CFG)" == "LZMA - Win32 Release"
-
-# ADD CPP /O2
-# SUBTRACT CPP /YX /Yc /Yu
-
-!ELSEIF  "$(CFG)" == "LZMA - Win32 Debug"
-
-!ENDIF 
-
-# End Source File
-# Begin Source File
-
-SOURCE=.\LZMALen.h
-# End Source File
-# Begin Source File
-
-SOURCE=.\LZMALiteral.cpp
-
-!IF  "$(CFG)" == "LZMA - Win32 Release"
-
-# ADD CPP /O2
-# SUBTRACT CPP /YX /Yc /Yu
-
-!ELSEIF  "$(CFG)" == "LZMA - Win32 Debug"
-
-!ENDIF 
-
-# End Source File
-# Begin Source File
-
-SOURCE=.\LZMALiteral.h
 # End Source File
 # End Target
 # End Project

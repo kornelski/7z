@@ -1,7 +1,5 @@
 // Archive/Common/ItemNameUtils.h
 
-#pragma once
-
 #ifndef __ARCHIVE_ITEMNAMEUTILS_H
 #define __ARCHIVE_ITEMNAMEUTILS_H
 
@@ -10,9 +8,10 @@
 namespace NArchive {
 namespace NItemName {
 
-  UString MakeLegalName(const UString &aName);
-  UString GetOSName(const UString &aName);
-  UString GetOSName2(const UString &aName);
+  UString MakeLegalName(const UString &name);
+  UString GetOSName(const UString &name);
+  UString GetOSName2(const UString &name);
+  bool HasTailSlash(const AString &name, UINT codePage);
 
 }}
 

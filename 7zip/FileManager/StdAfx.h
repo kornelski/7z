@@ -3,9 +3,10 @@
 #ifndef __STDAFX_H
 #define __STDAFX_H
 
-#pragma once
-
 #define _WIN32_WINNT 0x0400
+
+// it's for Windows NT supporting (MENUITEMINFOW)
+#define WINVER 0x0400
 
 #include <windows.h>
 #include <stdio.h>
@@ -36,6 +37,5 @@ extern CComModule _Module;
 
 */
 #include <memory>
-
 
 #endif

@@ -1,7 +1,5 @@
 // Archive/Cab/MSZipDecoder.h
 
-#pragma once
-
 #ifndef __ARCHIVE_CAB_DECODER_H
 #define __ARCHIVE_CAB_DECODER_H
 
@@ -13,6 +11,7 @@
 
 #include "CabInBuffer.h"
 #include "MSZipExtConst.h"
+#include "MSZipConst.h"
 
 namespace NArchive {
 namespace NCab {
@@ -31,18 +30,16 @@ public:
 class CMSZipBitDecoder: public NStream::NLSBF::CDecoder<NCab::CInBuffer>
 {
 public:
-  void InitMain(ISequentialInStream *aStream, BYTE aReservedSize, UINT32 aNumBlocks)
+  void InitMain(Byte reservedSize, UInt32 aNumBlocks)
   {
-    m_Stream.Init(aStream, aReservedSize, aNumBlocks);
+    m_Stream.Init(reservedSize, aNumBlocks);
     Init();
   }
-  HRESULT ReadBlock(UINT32 &anUncompressedSize, bool &aDataAreCorrect)
+  HRESULT ReadBlock(UInt32 &uncompressedSize, bool &dataAreCorrect)
   {
-    return m_Stream.ReadBlock(anUncompressedSize, aDataAreCorrect);
+    return m_Stream.ReadBlock(uncompressedSize, dataAreCorrect);
   }
 };
-
-typedef NCompress::NHuffman::CDecoder<kNumHuffmanBits> CHuffmanDecoder;
 
 class CDecoder :
   public ICompressCoder,
@@ -50,18 +47,18 @@ class CDecoder :
 {
   CLZOutWindow m_OutWindowStream;
   CMSZipBitDecoder m_InBitStream;
-  CHuffmanDecoder m_MainDecoder;
-  CHuffmanDecoder m_DistDecoder;
-  CHuffmanDecoder m_LevelDecoder; // table for decoding other tables;
+  NCompress::NHuffman::CDecoder<kNumHuffmanBits, kStaticMainTableSize> m_MainDecoder;
+  NCompress::NHuffman::CDecoder<kNumHuffmanBits, kStaticDistTableSize> m_DistDecoder;
+  NCompress::NHuffman::CDecoder<kNumHuffmanBits, kLevelTableSize> m_LevelDecoder;
 
   bool m_FinalBlock;
   bool m_StoredMode;
-  UINT32 m_StoredBlockSize;
+  UInt32 m_StoredBlockSize;
 
-  BYTE m_ReservedSize;
-  UINT32 m_NumInDataBlocks;
+  Byte m_ReservedSize;
+  UInt32 m_NumInDataBlocks;
 
-  void DeCodeLevelTable(BYTE *newLevels, int numLevels);
+  void DeCodeLevelTable(Byte *newLevels, int numLevels);
   void ReadTables();
 public:
   CDecoder();
@@ -72,13 +69,13 @@ public:
   // void ReleaseStreams();
 
   STDMETHOD(Code)(ISequentialInStream *inStream,
-      ISequentialOutStream *outStream, const UINT64 *inSize, const UINT64 *outSize,
+      ISequentialOutStream *outStream, const UInt64 *inSize, const UInt64 *outSize,
       ICompressProgressInfo *progress);
 
-  void SetParams(BYTE aReservedSize, UINT32 aNumInDataBlocks) 
+  void SetParams(Byte reservedSize, UInt32 numInDataBlocks) 
   { 
-    m_ReservedSize = aReservedSize;
-    m_NumInDataBlocks = aNumInDataBlocks;
+    m_ReservedSize = reservedSize;
+    m_NumInDataBlocks = numInDataBlocks;
   }
 
 };

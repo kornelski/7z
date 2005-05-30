@@ -12,7 +12,6 @@
 #include "Windows/FileFind.h"
 #include "Windows/Thread.h"
 #include "Windows/Synchronization.h"
-#include "Windows/System.h"
 #include "Windows/Error.h"
 #include "Windows/COM.h"
 
@@ -34,6 +33,13 @@ static inline UINT GetCurrentFileCodePage()
   {  return AreFileApisANSI() ? CP_ACP : CP_OEMCP;}
 
 static LPCTSTR kTempDirPrefix = TEXT("7zO"); 
+
+static const wchar_t *virusMessage = L"File looks like virus (file name has long spaces in name). 7-Zip will not open it";
+
+static bool IsNameVirus(const UString &name)
+{
+  return (name.Find(L"     ") >= 0);
+}
 
 struct CTmpProcessInfo: public CTempFileInfo
 {
@@ -186,7 +192,7 @@ static HANDLE StartApplication(CSysString &path, HWND window)
 {
   SHELLEXECUTEINFO execInfo;
   execInfo.cbSize = sizeof(execInfo);
-  execInfo.fMask = SEE_MASK_NOCLOSEPROCESS; // 
+  execInfo.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_DDEWAIT;
   execInfo.hwnd = NULL;
   execInfo.lpVerb = NULL;
   execInfo.lpFile = path;
@@ -228,7 +234,9 @@ void CPanel::OpenFolderExternal(int index)
 {
   CSysString fullPath = GetSystemString((_currentFolderPrefix + 
       GetItemName(index)), GetCurrentFileCodePage());
-  StartApplication(fullPath, (HWND)*this);
+  HANDLE hProcess = StartApplication(fullPath, (HWND)*this);
+  if (hProcess != 0)
+    ::CloseHandle(hProcess);
 }
 
 void CPanel::OpenItem(int index, bool tryInternal, bool tryExternal)
@@ -239,8 +247,14 @@ void CPanel::OpenItem(int index, bool tryInternal, bool tryExternal)
     OpenItemInArchive(index, tryInternal, tryExternal, false);
     return;
   }
-  CSysString fullPath = GetSystemString((_currentFolderPrefix + 
-      GetItemName(index)), GetCurrentFileCodePage());
+  UString name = GetItemName(index);
+  if (IsNameVirus(name))
+  {
+    MessageBoxMyError(virusMessage);
+    return;
+  }
+  CSysString fullPath = GetSystemString((_currentFolderPrefix + name), 
+      GetCurrentFileCodePage());
   if (tryInternal)
     if (!tryExternal || !DoItemAlwaysStart(GetItemName(index)))
       if (OpenItemAsArchive(index) == S_OK)
@@ -283,10 +297,14 @@ LRESULT CPanel::OnOpenItemChanged(LPARAM lParam)
   // LoadCurrentPath()
   if (tmpProcessInfo.FullPathFolderPrefix != _currentFolderPrefix)
     return 0;
+
+  CSelectedState state;
+  SaveSelectedState(state);
+
   HRESULT result = OnOpenItemChanged(tmpProcessInfo.FolderPath, tmpProcessInfo.ItemName);
   if (result != S_OK)
     return 0;
-  RefreshListCtrlSaveFocused();
+  RefreshListCtrl(state);
   return 1;
 }
 
@@ -375,6 +393,14 @@ struct CThreadExtractInArchive
 void CPanel::OpenItemInArchive(int index, bool tryInternal, bool tryExternal,
     bool editMode)
 {
+  UString name = GetItemName(index);
+  if (IsNameVirus(name))
+  {
+    MessageBoxMyError(virusMessage);
+    return;
+  }
+
+
   CMyComPtr<IFolderOperations> folderOperations;
   if (_folder.QueryInterface(IID_IFolderOperations, &folderOperations) != S_OK)
   {
@@ -390,13 +416,14 @@ void CPanel::OpenItemInArchive(int index, bool tryInternal, bool tryExternal,
 
   extracter.ExtractCallbackSpec = new CExtractCallbackImp;
   extracter.ExtractCallback = extracter.ExtractCallbackSpec;
-  extracter.ExtractCallbackSpec->_parentWindow = GetParent();
+  extracter.ExtractCallbackSpec->ParentWindow = GetParent();
   
   // extracter.ExtractCallbackSpec->_appTitle.Window = extracter.ExtractCallbackSpec->_parentWindow;
   // extracter.ExtractCallbackSpec->_appTitle.Title = progressWindowTitle;
   // extracter.ExtractCallbackSpec->_appTitle.AddTitle = title + CSysString(TEXT(" "));
 
-  extracter.ExtractCallbackSpec->Init(NExtractionMode::NOverwrite::kWithoutPrompt, false, L"");
+  extracter.ExtractCallbackSpec->OverwriteMode = NExtract::NOverwriteMode::kWithoutPrompt;
+  extracter.ExtractCallbackSpec->Init();
   extracter.Indices.Add(index);
   extracter.DestPath = GetUnicodeString(tempDir + NFile::NName::kDirDelimiter);
   extracter.FolderOperations = folderOperations;
@@ -406,13 +433,18 @@ void CPanel::OpenItemInArchive(int index, bool tryInternal, bool tryExternal,
     throw 271824;
   extracter.ExtractCallbackSpec->StartProgressDialog(LangLoadStringW(IDS_OPENNING, 0x03020283));
 
-  if (extracter.Result != S_OK)
+  if (extracter.Result != S_OK || extracter.ExtractCallbackSpec->Messages.Size() != 0)
   {
-    // MessageBox(TEXT("Can not extract item"));
+    if (extracter.Result != S_OK)
+      if (extracter.Result != E_ABORT)
+      {
+        // MessageBox(L"Can not extract item");
+        // NError::MyFormatMessage(systemError.ErrorCode, message);
+        MessageBoxError(extracter.Result, L"7-Zip");
+      }
     return;
   }
 
-  UString name = GetItemName(index);
   CSysString tempFileName = tempDir + NFile::NName::kDirDelimiter + 
       GetSystemString(name);
 

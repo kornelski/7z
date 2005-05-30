@@ -15,6 +15,7 @@
 #include "Resource/ComboDialog/ComboDialog.h"
 
 #include "FSFolder.h"
+#include "LangUtils.h"
 #include "FormatUtils.h"
 
 #include "UpdateCallback100.h"
@@ -25,7 +26,7 @@ using namespace NFile;
 struct CThreadDelete
 {
   CMyComPtr<IFolderOperations> FolderOperations;
-  CRecordVector<UINT32> Indices;
+  CRecordVector<UInt32> Indices;
   CMyComPtr<IFolderArchiveUpdateCallback> UpdateCallback;
   CUpdateCallback100Imp *UpdateCallbackSpec;
   HRESULT Result;
@@ -46,7 +47,6 @@ struct CThreadDelete
   }
 };
 
-
 void CPanel::DeleteItems()
 {
   CMyComPtr<IFolderOperations> folderOperations;
@@ -56,10 +56,14 @@ void CPanel::DeleteItems()
     return;
   }
 
-  CRecordVector<UINT32> indices;
+  CPanel::CDisableTimerProcessing disableTimerProcessing2(*this);
+  CRecordVector<UInt32> indices;
   GetOperatedItemIndices(indices);
   if (indices.IsEmpty())
     return;
+  CSelectedState state;
+  SaveSelectedState(state);
+
   UString title;
   UString message;
   if (indices.Size() == 1)
@@ -86,7 +90,6 @@ void CPanel::DeleteItems()
   if (::MessageBoxW(GetParent(), message, title, MB_OKCANCEL | MB_ICONQUESTION) != IDOK)
     return;
 
-
   CThreadDelete deleter;
   deleter.UpdateCallbackSpec = new CUpdateCallback100Imp;
   deleter.UpdateCallback = deleter.UpdateCallbackSpec;
@@ -101,8 +104,6 @@ void CPanel::DeleteItems()
   deleter.FolderOperations = folderOperations;
   deleter.Indices = indices;
 
-  CPanel::CDisableTimerProcessing disableTimerProcessing2(*this);
-
   CThread thread;
   if (!thread.Create(CThreadDelete::MyThreadFunction, &deleter))
     throw 271824;
@@ -112,7 +113,7 @@ void CPanel::DeleteItems()
   if (result != S_OK)
     MessageBoxError(result, LangLoadStringW(IDS_ERROR_DELETING, 0x03020217));
 
-  RefreshListCtrlSaveFocused();
+  RefreshListCtrl(state);
 }
 
 BOOL CPanel::OnBeginLabelEdit(LV_DISPINFO * lpnmh)
@@ -149,10 +150,7 @@ BOOL CPanel::OnEndLabelEdit(LV_DISPINFO * lpnmh)
     return FALSE;
   }
   // Can't use RefreshListCtrl here.
-  // UStringVector selectedItems;
-  // selectedItems.Add(newName);
-  // RefreshListCtrl(newName, -1, selectedItems);
-  // RefreshListCtrl();
+  // RefreshListCtrlSaveFocused();
   PostMessage(kReLoadMessage);
   return TRUE;
 }
@@ -165,27 +163,27 @@ void CPanel::CreateFolder()
     MessageBox(LangLoadStringW(IDS_OPERATION_IS_NOT_SUPPORTED, 0x03020208));
     return;
   }
+  CPanel::CDisableTimerProcessing disableTimerProcessing2(*this);
+  CSelectedState state;
+  SaveSelectedState(state);
   CComboDialog comboDialog;
   comboDialog.Title = LangLoadStringW(IDS_CREATE_FOLDER, 0x03020230);
   comboDialog.Static = LangLoadStringW(IDS_CREATE_FOLDER_NAME, 0x03020231);
-  comboDialog.Value = LangLoadStringW(IDS_CREATE_FOLDER_DEFAULT_NAME, /*0x03020232*/ (UINT32)-1);
+  comboDialog.Value = LangLoadStringW(IDS_CREATE_FOLDER_DEFAULT_NAME, /*0x03020232*/ (UInt32)-1);
   if (comboDialog.Create(GetParent()) == IDCANCEL)
     return;
   UString newName = GetUnicodeString(comboDialog.Value);
-  CPanel::CDisableTimerProcessing disableTimerProcessing2(*this);
   HRESULT result = folderOperations->CreateFolder(newName, 0);
   if (result != S_OK)
   {
     MessageBoxError(result, LangLoadStringW(IDS_CREATE_FOLDER_ERROR, 0x03020233));
     return;
   }
-  UStringVector selectedNames;
-  GetSelectedNames(selectedNames);
   int pos = newName.Find(TEXT('\\'));
   if (pos >= 0)
     newName = newName.Left(pos);
-  // SetFocus();
-  RefreshListCtrl(newName, _listView.GetFocusedItem(), selectedNames);
+  state.FocusedName = newName;
+  RefreshListCtrl(state);
 }
 
 void CPanel::CreateFile()
@@ -196,27 +194,27 @@ void CPanel::CreateFile()
     MessageBox(LangLoadStringW(IDS_OPERATION_IS_NOT_SUPPORTED, 0x03020208));
     return;
   }
+  CPanel::CDisableTimerProcessing disableTimerProcessing2(*this);
+  CSelectedState state;
+  SaveSelectedState(state);
   CComboDialog comboDialog;
   comboDialog.Title = LangLoadStringW(IDS_CREATE_FILE, 0x03020240);
   comboDialog.Static = LangLoadStringW(IDS_CREATE_FILE_NAME, 0x03020241);
-  comboDialog.Value = LangLoadStringW(IDS_CREATE_FILE_DEFAULT_NAME, /*0x03020242*/ (UINT32)-1);
+  comboDialog.Value = LangLoadStringW(IDS_CREATE_FILE_DEFAULT_NAME, /*0x03020242*/ (UInt32)-1);
   if (comboDialog.Create(GetParent()) == IDCANCEL)
     return;
   UString newName = GetUnicodeString(comboDialog.Value);
-  CPanel::CDisableTimerProcessing disableTimerProcessing2(*this);
   HRESULT result = folderOperations->CreateFile(newName, 0);
   if (result != S_OK)
   {
     MessageBoxError(result, LangLoadStringW(IDS_CREATE_FILE_ERROR, 0x03020243));
     return;
   }
-  UStringVector selectedNames;
-  GetSelectedNames(selectedNames);
   int pos = newName.Find(TEXT('\\'));
   if (pos >= 0)
     newName = newName.Left(pos);
-  RefreshListCtrl(newName, _listView.GetFocusedItem(),
-      selectedNames);
+  state.FocusedName = newName;
+  RefreshListCtrl(state);
 }
 
 void CPanel::RenameFile()
@@ -228,12 +226,15 @@ void CPanel::RenameFile()
 
 void CPanel::ChangeComment()
 {
+  CPanel::CDisableTimerProcessing disableTimerProcessing2(*this);
   int index = _listView.GetFocusedItem();
   if (index < 0)
     return;
   int realIndex = GetRealItemIndex(index);
   if (realIndex == -1)
     return;
+  CSelectedState state;
+  SaveSelectedState(state);
   CMyComPtr<IFolderOperations> folderOperations;
   if (_folder.QueryInterface(IID_IFolderOperations, &folderOperations) != S_OK)
   {
@@ -259,11 +260,12 @@ void CPanel::ChangeComment()
   if (comboDialog.Create(GetParent()) == IDCANCEL)
     return;
   NCOM::CPropVariant propVariant = GetUnicodeString(comboDialog.Value);
+
   HRESULT result = folderOperations->SetProperty(realIndex, kpidComment, &propVariant, NULL);
   if (result != S_OK)
   {
     MessageBoxError(result, L"Set Comment Error");
   }
-  RefreshListCtrlSaveFocused();
+  RefreshListCtrl(state);
 }
 

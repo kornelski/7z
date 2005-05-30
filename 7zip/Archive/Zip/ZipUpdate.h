@@ -1,7 +1,5 @@
 // Zip/Update.h
 
-#pragma once
-
 #ifndef __ZIP_UPDATE_H
 #define __ZIP_UPDATE_H
 
@@ -19,11 +17,10 @@ namespace NZip {
 
 struct CUpdateRange
 {
-  UINT32 Position; 
-  UINT32 Size;
+  UInt64 Position; 
+  UInt64 Size;
   CUpdateRange() {};
-  CUpdateRange(UINT32 position, UINT32 size):
-      Position(position), Size(size) {};
+  CUpdateRange(UInt64 position, UInt64 size): Position(position), Size(size) {};
 };
 
 struct CUpdateItem
@@ -33,23 +30,18 @@ struct CUpdateItem
   bool IsDirectory;
   int IndexInArchive;
   int IndexInClient;
-  UINT32 Attributes;
-  UINT32 Time;
-  UINT32 Size;
+  UInt32 Attributes;
+  UInt32 Time;
+  UInt64 Size;
   AString Name;
-  // bool ExistInArchive;
-  bool Commented;
-  CUpdateRange CommentRange;
-  /*
-  bool IsDirectory() const 
-    { return ((Attributes & FILE_ATTRIBUTE_DIRECTORY) != 0); };
-  */
+  // bool Commented;
+  // CUpdateRange CommentRange;
 };
 
 HRESULT Update(
     const CObjectVector<CItemEx> &inputItems,
     const CObjectVector<CUpdateItem> &updateItems,
-    IOutStream *outStream,
+    ISequentialOutStream *seqOutStream,
     CInArchive *inArchive,
     CCompressionMethodMode *compressionMethodMode,
     IArchiveUpdateCallback *updateCallback);

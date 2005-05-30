@@ -1,14 +1,12 @@
-// MT_MF.h
+// LZ/MT.h
 
-#pragma once
+#ifndef __LZ_MT_H
+#define __LZ_MT_H
 
-#ifndef __MT_MF_H
-#define __MT_MF_H
+#include "../../../../Common/MyCom.h"
 
-#include "Common/MyCom.h"
-
-#include "Windows/Thread.h"
-#include "Windows/Synchronization.h"
+#include "../../../../Windows/Thread.h"
+#include "../../../../Windows/Synchronization.h"
 
 #include "../../../ICoder.h"
 #include "../IMatchFinder.h"
@@ -21,65 +19,65 @@ class CMatchFinderMT:
 {
   MY_UNKNOWN_IMP
 
-  STDMETHOD(Init)(ISequentialInStream *aStream);
+  STDMETHOD(Init)(ISequentialInStream *s);
   STDMETHOD_(void, ReleaseStream)();
   STDMETHOD(MovePos)();
-  STDMETHOD_(BYTE, GetIndexByte)(UINT32 anIndex);
-  STDMETHOD_(UINT32, GetMatchLen)(UINT32 aIndex, UINT32 aBack, UINT32 aLimit);
-  STDMETHOD_(UINT32, GetNumAvailableBytes)();
-  STDMETHOD_(const BYTE *, GetPointerToCurrentPos)();
-  STDMETHOD(Create)(UINT32 aSizeHistory, 
-      UINT32 aKeepAddBufferBefore, UINT32 aMatchMaxLen, 
-      UINT32 aKeepAddBufferAfter);
-  STDMETHOD_(UINT32, GetLongestMatch)(UINT32 *aDistances);
+  STDMETHOD_(Byte, GetIndexByte)(Int32 index);
+  STDMETHOD_(UInt32, GetMatchLen)(Int32 index, UInt32 distance, UInt32 limit);
+  STDMETHOD_(UInt32, GetNumAvailableBytes)();
+  STDMETHOD_(const Byte *, GetPointerToCurrentPos)();
+  STDMETHOD(Create)(UInt32 sizeHistory, 
+      UInt32 keepAddBufferBefore, UInt32 matchMaxLen, 
+      UInt32 keepAddBufferAfter);
+  STDMETHOD_(UInt32, GetLongestMatch)(UInt32 *distances);
   STDMETHOD_(void, DummyLongestMatch)();
 
-private:
-public:
-  CMyComPtr<IMatchFinder> m_MatchFinder;
-  UINT32 m_MatchMaxLen;
+  UInt32 m_CurrentPos;
+  UInt32 m_CurrentLimitPos;
+  UInt32 m_MatchMaxLen;
   
-  UINT32 m_BlockSize;
-  // UINT32 m_BufferSize;
-  UINT32 *m_Buffer;
-  UINT32 *m_Buffers[kNumMTBlocks];
+  UInt32 m_BlockSize;
+  UInt32 *m_Buffer;
+  UInt32 *m_Buffers[kNumMTBlocks];
+  UInt32 *m_DummyBuffer;
 
   bool m_NeedStart;
-  UINT32 m_WriteBufferIndex;
-  UINT32 m_ReadBufferIndex;
+  UInt32 m_WriteBufferIndex;
+  UInt32 m_ReadBufferIndex;
 
   NWindows::NSynchronization::CAutoResetEvent m_StopWriting;
   NWindows::NSynchronization::CAutoResetEvent m_WritingWasStopped;
 
+  NWindows::NSynchronization::CManualResetEvent m_ExitEvent;
+  NWindows::NSynchronization::CAutoResetEvent m_CanReadEvents[kNumMTBlocks];
+  NWindows::NSynchronization::CAutoResetEvent m_CanWriteEvents[kNumMTBlocks];
+  HRESULT m_Results[kNumMTBlocks];
+
+  UInt32 m_LimitPos[kNumMTBlocks];
+  UInt32 m_NumAvailableBytes[kNumMTBlocks];
+
+  UInt32 m_NumAvailableBytesCurrent;
+  
+  NWindows::CThread m_Thread;
+  UInt32 _multiThreadMult;
+
+  HRESULT m_Result;
+
+  void Start();
+  void FreeMem();
+
+public:
   NWindows::NSynchronization::CAutoResetEvent m_AskChangeBufferPos;
   NWindows::NSynchronization::CAutoResetEvent m_CanChangeBufferPos;
   NWindows::NSynchronization::CAutoResetEvent m_BufferPosWasChanged;
+  CMyComPtr<IMatchFinder> m_MatchFinder;
+  const Byte *m_DataCurrentPos;
 
-  NWindows::NSynchronization::CManualResetEvent m_ExitEvent;
-  // NWindows::NSynchronization::CManualResetEvent m_NewStart;
-  NWindows::NSynchronization::CAutoResetEvent m_CanReadEvents[kNumMTBlocks];
-  NWindows::NSynchronization::CAutoResetEvent m_CanWriteEvents[kNumMTBlocks];
-  UINT32 m_LimitPos[kNumMTBlocks];
-  UINT32 m_NumAvailableBytes[kNumMTBlocks];
-
-  UINT32 m_NumAvailableBytesCurrent;
-  const BYTE *m_DataCurrentPos;
+  DWORD ThreadFunc();
   
-  UINT32 m_CurrentLimitPos;
-  UINT32 m_CurrentPos;
-
-  NWindows::CThread m_Thread;
-  // bool m_WriteWasClosed;
-  UINT32 _multiThreadMult;
-public:
   CMatchFinderMT();
   ~CMatchFinderMT();
-  void Start();
-  void FreeMem();
-  HRESULT SetMatchFinder(IMatchFinder *aMatchFinder, 
-      UINT32 multiThreadMult = 200);
+  HRESULT SetMatchFinder(IMatchFinder *matchFinder, UInt32 multiThreadMult = 200);
 };
  
-
 #endif
-

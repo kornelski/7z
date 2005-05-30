@@ -2,9 +2,8 @@
 
 #include "StdAfx.h"
 
-#include "Common/Defs.h"
-#include "Windows/Defs.h"
 #include "../../Common/ProgressUtils.h"
+#include "Windows/PropVariant.h"
 
 #include "BZip2Update.h"
 
@@ -21,17 +20,17 @@ extern CSysString GetBZip2CodecPath();
 namespace NArchive {
 namespace NBZip2 {
 
-HRESULT UpdateArchive(UINT64 unpackSize,
-    IOutStream *outStream,
+HRESULT UpdateArchive(UInt64 unpackSize,
+    ISequentialOutStream *outStream,
     int indexInClient,
+    UInt32 numPasses,
     IArchiveUpdateCallback *updateCallback)
 {
   RINOK(updateCallback->SetTotal(unpackSize));
-  
-  UINT64 complexity = 0;
+  UInt64 complexity = 0;
   RINOK(updateCallback->SetCompleted(&complexity));
 
-  CMyComPtr<IInStream> fileInStream;
+  CMyComPtr<ISequentialInStream> fileInStream;
 
   RINOK(updateCallback->GetStream(indexInClient, &fileInStream));
 
@@ -49,6 +48,27 @@ HRESULT UpdateArchive(UINT64 unpackSize,
   RINOK(lib.LoadAndCreateCoder(GetBZip2CodecPath(),
       CLSID_CCompressBZip2Encoder, &encoder));
   #endif
+
+  CMyComPtr<ICompressSetCoderProperties> setCoderProperties;
+  encoder.QueryInterface(IID_ICompressSetCoderProperties, &setCoderProperties);
+  if (setCoderProperties)
+  {
+    /*
+    NWindows::NCOM::CPropVariant properties[2] = 
+    {
+      dictionary, numPasses
+    };
+    PROPID propIDs[2] = 
+    {
+      NCoderPropID::kDictionarySize,
+      NCoderPropID::kNumPasses,
+    };
+    RINOK(setCoderProperties->SetCoderProperties(propIDs, properties, 2));
+    */
+    NWindows::NCOM::CPropVariant property = numPasses;
+    PROPID propID = NCoderPropID::kNumPasses;
+    RINOK(setCoderProperties->SetCoderProperties(&propID, &property, 1));
+  }
   
   RINOK(encoder->Code(fileInStream, outStream, NULL, NULL, localProgress));
   

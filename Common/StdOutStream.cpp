@@ -10,15 +10,15 @@
 
 static const char kNewLineChar =  '\n';
 
-static LPCTSTR kFileOpenMode = TEXT("wt");
+static const char *kFileOpenMode = "wt";
 
 CStdOutStream  g_StdOut(stdout);
 CStdOutStream  g_StdErr(stderr);
 
-bool CStdOutStream::Open(LPCTSTR fileName)
+bool CStdOutStream::Open(const char *fileName)
 {
   Close();
-  _stream = _tfopen(fileName, kFileOpenMode);
+  _stream = fopen(fileName, kFileOpenMode);
   _streamIsOpen = (_stream != 0);
   return _streamIsOpen;
 }
@@ -67,14 +67,14 @@ CStdOutStream & CStdOutStream::operator<<(char c)
 
 CStdOutStream & CStdOutStream::operator<<(int number)
 {
-  char textString[16];
-  ConvertINT64ToString(number, textString);
+  char textString[32];
+  ConvertInt64ToString(number, textString);
   return operator<<(textString);
 }
 
-CStdOutStream & CStdOutStream::operator<<(UINT64 number)
+CStdOutStream & CStdOutStream::operator<<(UInt64 number)
 {
   char textString[32];
-  ConvertUINT64ToString(number, textString);
+  ConvertUInt64ToString(number, textString);
   return operator<<(textString);
 }

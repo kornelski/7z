@@ -2,6 +2,8 @@
 
 #include "StdAfx.h"
 
+#include <stdio.h>
+
 #include "PropVariantConversions.h"
 
 #include "Windows/NationalTime.h"
@@ -12,70 +14,75 @@
 
 using namespace NWindows;
 
-static UString ConvertUINT64ToString(UINT64 value)
+static UString ConvertUInt64ToString(UInt64 value)
 {
   wchar_t buffer[32];
-  ConvertUINT64ToString(value, buffer);
+  ConvertUInt64ToString(value, buffer);
   return buffer;
 }
 
-static UString ConvertINT64ToString(INT64 value)
+static UString ConvertInt64ToString(Int64 value)
 {
   wchar_t buffer[32];
-  ConvertINT64ToString(value, buffer);
+  ConvertInt64ToString(value, buffer);
   return buffer;
 }
 
 /*
-CSysString ConvertFileTimeToString(const FILETIME &fileTime, bool includeTime)
+static void UIntToStringSpec(UInt32 value, char *s, int numPos)
 {
-  SYSTEMTIME systemTime;
-  if(!BOOLToBool(FileTimeToSystemTime(&fileTime, &systemTime)))
-    #ifndef _WIN32_WCE
-    throw 311907;
-    #else
-    return CSysString();
-    #endif
-
-  const int kBufferSize = 64;
-  CSysString stringDate;
-  if(!NNational::NTime::MyGetDateFormat(LOCALE_USER_DEFAULT, 
-      0, &systemTime, NULL, stringDate))
-    #ifndef _WIN32_WCE
-    throw 311908;
-    #else
-    return CSysString();
-    #endif
-  if (!includeTime)
-    return stringDate;
-  CSysString stringTime;
-  if(!NNational::NTime::MyGetTimeFormat(LOCALE_USER_DEFAULT, 
-      0, &systemTime, NULL, stringTime))
-    #ifndef _WIN32_WCE
-    throw 311909;
-    #else
-    return CSysString();
-    #endif
-  return stringDate + _T(" ") + stringTime;
+  char s2[32];
+  ConvertUInt64ToString(value, s2);
+  int len = strlen(s2);
+  int i;
+  for (i = 0; i < numPos - len; i++)
+    s[i] = '0';
+  for (int j = 0; j < len; j++, i++)
+    s[i] = s2[j];
+  s[i] = '\0';
 }
 */
 
-UString ConvertFileTimeToString2(const FILETIME &fileTime, 
-    bool includeTime, bool includeSeconds)
+bool ConvertFileTimeToString(const FILETIME &ft, char *s, bool includeTime, bool includeSeconds)
 {
-  CSysString string;
-  SYSTEMTIME systemTime;
-  if(!BOOLToBool(FileTimeToSystemTime(&fileTime, &systemTime)))
-    return UString();
-  TCHAR buffer[64];
-  wsprintf(buffer, TEXT("%04d-%02d-%02d"), systemTime.wYear, systemTime.wMonth, systemTime.wDay);
+  s[0] = '\0';
+  SYSTEMTIME st;
+  if(!BOOLToBool(FileTimeToSystemTime(&ft, &st)))
+    return false;
+  /*
+  UIntToStringSpec(st.wYear, s, 4);
+  strcat(s, "-");
+  UIntToStringSpec(st.wMonth, s + strlen(s), 2);
+  strcat(s, "-");
+  UIntToStringSpec(st.wDay, s + strlen(s), 2);
   if (includeTime)
   {
-    wsprintf(buffer + lstrlen(buffer), TEXT(" %02d:%02d"), systemTime.wHour, systemTime.wMinute);
+    strcat(s, " ");
+    UIntToStringSpec(st.wHour, s + strlen(s), 2);
+    strcat(s, ":");
+    UIntToStringSpec(st.wMinute, s + strlen(s), 2);
     if (includeSeconds)
-      wsprintf(buffer + lstrlen(buffer), TEXT(":%02d"), systemTime.wSecond);
+    {
+      strcat(s, ":");
+      UIntToStringSpec(st.wSecond, s + strlen(s), 2);
+    }
   }
-  return GetUnicodeString(buffer);
+  */
+  sprintf(s, "%04d-%02d-%02d", st.wYear, st.wMonth, st.wDay);
+  if (includeTime)
+  {
+    sprintf(s + strlen(s), " %02d:%02d", st.wHour, st.wMinute);
+    if (includeSeconds)
+      sprintf(s + strlen(s), ":%02d", st.wSecond);
+  }
+  return true;
+}
+
+UString ConvertFileTimeToString(const FILETIME &fileTime, bool includeTime, bool includeSeconds)
+{
+  char s[32];
+  ConvertFileTimeToString(fileTime, s,  includeTime, includeSeconds);
+  return GetUnicodeString(s);
 }
  
 
@@ -88,27 +95,25 @@ UString ConvertPropVariantToString(const PROPVARIANT &propVariant)
     case VT_BSTR:
       return propVariant.bstrVal;
     case VT_UI1:
-      return ConvertUINT64ToString(propVariant.bVal);
+      return ConvertUInt64ToString(propVariant.bVal);
     case VT_UI2:
-      return ConvertUINT64ToString(propVariant.uiVal);
+      return ConvertUInt64ToString(propVariant.uiVal);
     case VT_UI4:
-      return ConvertUINT64ToString(propVariant.ulVal);
+      return ConvertUInt64ToString(propVariant.ulVal);
     case VT_UI8:
-      return ConvertUINT64ToString(*(UINT64 *)(&propVariant.uhVal));
+      return ConvertUInt64ToString(propVariant.uhVal.QuadPart);
     case VT_FILETIME:
-      return ConvertFileTimeToString2(propVariant.filetime, true, true);
-
-
+      return ConvertFileTimeToString(propVariant.filetime, true, true);
     /*
     case VT_I1:
-      return ConvertINT64ToString(propVariant.cVal);
+      return ConvertInt64ToString(propVariant.cVal);
     */
     case VT_I2:
-      return ConvertINT64ToString(propVariant.iVal);
+      return ConvertInt64ToString(propVariant.iVal);
     case VT_I4:
-      return ConvertINT64ToString(propVariant.lVal);
+      return ConvertInt64ToString(propVariant.lVal);
     case VT_I8:
-      return ConvertINT64ToString(*(INT64 *)(&propVariant.hVal));
+      return ConvertInt64ToString(propVariant.hVal.QuadPart);
 
     case VT_BOOL:
       return VARIANT_BOOLToBool(propVariant.boolVal) ? L"1" : L"0";
@@ -116,12 +121,12 @@ UString ConvertPropVariantToString(const PROPVARIANT &propVariant)
       #ifndef _WIN32_WCE
       throw 150245;
       #else
-      return CSysString();
+      return UString();
       #endif
   }
 }
 
-UINT64 ConvertPropVariantToUINT64(const PROPVARIANT &propVariant)
+UInt64 ConvertPropVariantToUInt64(const PROPVARIANT &propVariant)
 {
   switch (propVariant.vt)
   {
@@ -132,7 +137,7 @@ UINT64 ConvertPropVariantToUINT64(const PROPVARIANT &propVariant)
     case VT_UI4:
       return propVariant.ulVal;
     case VT_UI8:
-      return (*(UINT64 *)(&propVariant.uhVal));
+      return (UInt64)propVariant.uhVal.QuadPart;
     default:
       #ifndef _WIN32_WCE
       throw 151199;

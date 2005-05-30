@@ -1,9 +1,9 @@
 // UserInputUtils.h
 
-#pragma once
-
 #ifndef __USERINPUTUTILS_H
 #define __USERINPUTUTILS_H
+
+#include "Common/StdOutStream.h"
 
 namespace NUserAnswerMode {
 
@@ -18,6 +18,7 @@ enum EEnum
 };
 }
 
-NUserAnswerMode::EEnum ScanUserYesNoAllQuit();
+NUserAnswerMode::EEnum ScanUserYesNoAllQuit(CStdOutStream *outStream);
+UString GetPassword(CStdOutStream *outStream);
 
 #endif

@@ -44,13 +44,13 @@ STDMETHODIMP CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value)
   return S_OK;
 }
 
-STDMETHODIMP CHandler::GetNumberOfProperties(UINT32 *numProperties)
+STDMETHODIMP CHandler::GetNumberOfProperties(UInt32 *numProperties)
 {
   *numProperties = sizeof(kProperties) / sizeof(kProperties[0]);
   return S_OK;
 }
 
-STDMETHODIMP CHandler::GetPropertyInfo(UINT32 index,     
+STDMETHODIMP CHandler::GetPropertyInfo(UInt32 index,     
       BSTR *name, PROPID *propID, VARTYPE *varType)
 {
   if(index >= sizeof(kProperties) / sizeof(kProperties[0]))
@@ -62,25 +62,25 @@ STDMETHODIMP CHandler::GetPropertyInfo(UINT32 index,
   return S_OK;
 }
 
-STDMETHODIMP CHandler::GetNumberOfArchiveProperties(UINT32 *numProperties)
+STDMETHODIMP CHandler::GetNumberOfArchiveProperties(UInt32 *numProperties)
 {
   *numProperties = 0;
   return S_OK;
 }
 
-STDMETHODIMP CHandler::GetArchivePropertyInfo(UINT32 index,     
+STDMETHODIMP CHandler::GetArchivePropertyInfo(UInt32 index,     
       BSTR *name, PROPID *propID, VARTYPE *varType)
 {
   return E_INVALIDARG;
 }
 
-STDMETHODIMP CHandler::GetNumberOfItems(UINT32 *numItems)
+STDMETHODIMP CHandler::GetNumberOfItems(UInt32 *numItems)
 {
   *numItems = 1;
   return S_OK;
 }
 
-STDMETHODIMP CHandler::GetProperty(UINT32 index, PROPID propID,  PROPVARIANT *value)
+STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID,  PROPVARIANT *value)
 {
   COM_TRY_BEGIN
   NWindows::NCOM::CPropVariant propVariant;
@@ -101,7 +101,7 @@ STDMETHODIMP CHandler::GetProperty(UINT32 index, PROPID propID,  PROPVARIANT *va
 }
 
 STDMETHODIMP CHandler::Open(IInStream *stream, 
-    const UINT64 *maxCheckStartPosition,
+    const UInt64 *maxCheckStartPosition,
     IArchiveOpenCallback *openArchiveCallback)
 {
   COM_TRY_BEGIN
@@ -109,15 +109,15 @@ STDMETHODIMP CHandler::Open(IInStream *stream,
   {
     RINOK(stream->Seek(0, STREAM_SEEK_CUR, &_streamStartPosition));
     const int kSignatureSize = 3;
-    BYTE buffer[kSignatureSize];
-    UINT32 processedSize;
+    Byte buffer[kSignatureSize];
+    UInt32 processedSize;
     RINOK(stream->Read(buffer, kSignatureSize, &processedSize));
     if (processedSize != kSignatureSize)
       return S_FALSE;
     if (buffer[0] != 'B' || buffer[1] != 'Z' || buffer[2] != 'h')
       return S_FALSE;
 
-    UINT64 endPosition;
+    UInt64 endPosition;
     RINOK(stream->Seek(0, STREAM_SEEK_END, &endPosition));
     _item.PackSize = endPosition - _streamStartPosition;
     
@@ -138,11 +138,11 @@ STDMETHODIMP CHandler::Close()
 }
 
 
-STDMETHODIMP CHandler::Extract(const UINT32* indices, UINT32 numItems,
-    INT32 testModeSpec, IArchiveExtractCallback *extractCallback)
+STDMETHODIMP CHandler::Extract(const UInt32* indices, UInt32 numItems,
+    Int32 testModeSpec, IArchiveExtractCallback *extractCallback)
 {
   COM_TRY_BEGIN
-  bool allFilesMode = (numItems == UINT32(-1));
+  bool allFilesMode = (numItems == UInt32(-1));
   if (!allFilesMode)
   {
     if (numItems == 0)
@@ -157,12 +157,12 @@ STDMETHODIMP CHandler::Extract(const UINT32* indices, UINT32 numItems,
 
   extractCallback->SetTotal(_item.PackSize);
 
-  UINT64 currentTotalPacked = 0;
+  UInt64 currentTotalPacked = 0, currentTotalUnPacked = 0;
   
   RINOK(extractCallback->SetCompleted(&currentTotalPacked));
   
   CMyComPtr<ISequentialOutStream> realOutStream;
-  INT32 askMode;
+  Int32 askMode;
   askMode = testMode ? NArchive::NExtract::NAskMode::kTest :
   NArchive::NExtract::NAskMode::kExtract;
   
@@ -171,7 +171,26 @@ STDMETHODIMP CHandler::Extract(const UINT32* indices, UINT32 numItems,
   if(!testMode && !realOutStream)
     return S_OK;
 
+
   extractCallback->PrepareOperation(askMode);
+
+  #ifndef COMPRESS_BZIP2
+  CCoderLibrary lib;
+  #endif
+  CMyComPtr<ICompressCoder> decoder;
+  #ifdef COMPRESS_BZIP2
+  decoder = new NCompress::NBZip2::CDecoder;
+  #else
+  HRESULT loadResult = lib.LoadAndCreateCoder(
+      GetBZip2CodecPath(),
+      CLSID_CCompressBZip2Decoder, &decoder);
+  if (loadResult != S_OK)
+  {
+    RINOK(extractCallback->SetOperationResult(NArchive::NExtract::NOperationResult::kUnSupportedMethod));
+    return S_OK;
+  }
+  #endif
+
 
   CDummyOutStream *outStreamSpec = new CDummyOutStream;
   CMyComPtr<ISequentialOutStream> outStream(outStreamSpec);
@@ -182,31 +201,72 @@ STDMETHODIMP CHandler::Extract(const UINT32* indices, UINT32 numItems,
   CLocalProgress *localProgressSpec = new CLocalProgress;
   CMyComPtr<ICompressProgressInfo> progress = localProgressSpec;
   localProgressSpec->Init(extractCallback, true);
+
+  CLocalCompressProgressInfo *localCompressProgressSpec = 
+      new CLocalCompressProgressInfo;
+  CMyComPtr<ICompressProgressInfo> compressProgress = localCompressProgressSpec;
   
   RINOK(_stream->Seek(_streamStartPosition, STREAM_SEEK_SET, NULL));
 
-  #ifndef COMPRESS_BZIP2
-  CCoderLibrary lib;
-  #endif
-  CMyComPtr<ICompressCoder> decoder;
-  #ifdef COMPRESS_BZIP2
-  decoder = new NCompress::NBZip2::CDecoder;
-  #else
-  RINOK(lib.LoadAndCreateCoder(
-      GetBZip2CodecPath(),
-      CLSID_CCompressBZip2Decoder, &decoder));
-  #endif
 
-  HRESULT result = decoder->Code(_stream, outStream, NULL, NULL, progress);
+  HRESULT result;
+
+  bool firstItem = true;
+  while(true)
+  {
+    localCompressProgressSpec->Init(progress, 
+      &currentTotalPacked,
+      &currentTotalUnPacked);
+
+    const int kSignatureSize = 3;
+    Byte buffer[kSignatureSize];
+    UInt32 processedSize;
+    RINOK(_stream->Read(buffer, kSignatureSize, &processedSize));
+    if (processedSize < kSignatureSize)
+    {
+      if (firstItem)
+        return E_FAIL;
+      break;
+    }
+    if (buffer[0] != 'B' || buffer[1] != 'Z' || buffer[2] != 'h')
+    {
+      if (firstItem)
+        return E_FAIL;
+      outStream.Release();
+      RINOK(extractCallback->SetOperationResult(NArchive::NExtract::NOperationResult::kOK))
+      return S_OK;
+    }
+    firstItem = false;
+
+    UInt64 dataStartPos;
+    RINOK(_stream->Seek((UInt64)(Int64)(-3), STREAM_SEEK_CUR, &dataStartPos));
+
+    result = decoder->Code(_stream, outStream, NULL, NULL, compressProgress);
+
+    if (result != S_OK)
+      break;
+
+    CMyComPtr<ICompressGetInStreamProcessedSize> getInStreamProcessedSize;
+    decoder.QueryInterface(IID_ICompressGetInStreamProcessedSize, 
+        &getInStreamProcessedSize);
+    if (!getInStreamProcessedSize)
+      break;
+
+    UInt64 packSize;
+    RINOK(getInStreamProcessedSize->GetInStreamProcessedSize(&packSize));
+    UInt64 pos;
+    RINOK(_stream->Seek(dataStartPos + packSize, STREAM_SEEK_SET, &pos));
+    currentTotalPacked = pos - _streamStartPosition;
+  }
   outStream.Release();
-  if (result == S_FALSE)
-    RINOK(extractCallback->SetOperationResult(
-        NArchive::NExtract::NOperationResult::kDataError))
-  else if (result == S_OK)
-    RINOK(extractCallback->SetOperationResult(
-      NArchive::NExtract::NOperationResult::kOK))
+
+  int retResult;
+  if (result == S_OK)
+    retResult = NArchive::NExtract::NOperationResult::kOK;
   else
-    return result;
+    retResult = NArchive::NExtract::NOperationResult::kDataError;
+
+  RINOK(extractCallback->SetOperationResult(retResult));
  
   return S_OK;
   COM_TRY_END

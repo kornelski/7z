@@ -1,9 +1,8 @@
-// DLLExports.cpp : Implementation of DLL Exports.
+// DLLExports.cpp
 
 #include "StdAfx.h"
 
-#include <initguid.h>
-
+#include "Common/MyInitGuid.h"
 #include "Common/ComTry.h"
 #include "Windows/PropVariant.h"
 #include "SplitHandler.h"
@@ -56,6 +55,9 @@ STDAPI GetHandlerProperty(PROPID propID, PROPVARIANT *value)
       break;
     case NArchive::kUpdate:
       propVariant = false;
+      break;
+    case NArchive::kKeepName:
+      propVariant = true;
       break;
   }
   propVariant.Detach(value);

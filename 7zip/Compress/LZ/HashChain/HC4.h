@@ -1,12 +1,7 @@
 // HC4.h
 
-#pragma once
-
-#ifndef __HC4__H
-#define __HC4__H
-
-#undef HC_CLSID
-#define HC_CLSID CLSID_CMatchFinderHC4
+#ifndef __HC4_H
+#define __HC4_H
 
 #undef HC_NAMESPACE
 #define HC_NAMESPACE NHC4
@@ -14,8 +9,8 @@
 #define HASH_ARRAY_2
 #define HASH_ARRAY_3
 
-#include "HCMF.h"
-#include "HCMFMain.h"
+#include "HC.h"
+#include "HCMain.h"
 
 #undef HASH_ARRAY_2
 #undef HASH_ARRAY_3

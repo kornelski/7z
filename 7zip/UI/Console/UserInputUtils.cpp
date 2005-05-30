@@ -3,16 +3,16 @@
 #include "StdAfx.h"
 
 #include "Common/StdInStream.h"
-#include "Common/StdOutStream.h"
+#include "Common/StringConvert.h"
 
 #include "UserInputUtils.h"
 
-static const char kYes  = 'Y';
-static const char kNo   = 'N';
-static const char kYesAll  = 'A';
-static const char kNoAll   = 'S';
-static const char kAutoRename  = 'U';
-static const char kQuit    = 'Q';
+static const char kYes = 'Y';
+static const char kNo = 'N';
+static const char kYesAll = 'A';
+static const char kNoAll = 'S';
+static const char kAutoRename = 'U';
+static const char kQuit = 'Q';
 
 static const char *kFirstQuestionMessage = "?\n";
 static const char *kHelpQuestionMessage = 
@@ -22,12 +22,12 @@ static const char *kHelpQuestionMessage =
 // in: anAll
 // out: anAll, anYes;
 
-NUserAnswerMode::EEnum ScanUserYesNoAllQuit()
+NUserAnswerMode::EEnum ScanUserYesNoAllQuit(CStdOutStream *outStream)
 {
-  g_StdOut << kFirstQuestionMessage;
+  (*outStream) << kFirstQuestionMessage;
   do
   {
-    g_StdOut << kHelpQuestionMessage;
+    (*outStream) << kHelpQuestionMessage;
     AString scannedString = g_StdIn.ScanStringUntilNewLine();
     scannedString.Trim();
     if(!scannedString.IsEmpty())
@@ -48,4 +48,11 @@ NUserAnswerMode::EEnum ScanUserYesNoAllQuit()
       }
   }
   while(true);
+}
+
+UString GetPassword(CStdOutStream *outStream)
+{
+  (*outStream) << "\nEnter password:";
+  AString oemPassword = g_StdIn.ScanStringUntilNewLine();
+  return MultiByteToUnicodeString(oemPassword, CP_OEMCP); 
 }

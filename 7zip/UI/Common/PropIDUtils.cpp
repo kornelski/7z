@@ -14,11 +14,22 @@
 
 using namespace NWindows;
 
-static UString ConvertUINT32ToString(UINT32 value)
+static UString ConvertUInt32ToString(UInt32 value)
 {
   wchar_t buffer[32];
-  ConvertUINT64ToString(value, buffer);
+  ConvertUInt64ToString(value, buffer);
   return buffer;
+}
+
+static void ConvertUInt32ToHex(UInt32 value, wchar_t *s)
+{
+  for (int i = 0; i < 8; i++)
+  {
+    int t = value & 0xF;
+    value >>= 4;
+    s[7 - i] = (wchar_t)((t < 10) ? (L'0' + t) : (L'A' + (t - 10)));
+  }
+  s[8] = L'\0';
 }
 
 UString ConvertPropertyToString(const PROPVARIANT &propVariant, 
@@ -38,22 +49,22 @@ UString ConvertPropertyToString(const PROPVARIANT &propVariant,
         return UString();
       if (!::FileTimeToLocalFileTime(&propVariant.filetime, &localFileTime))
         return UString(); // It is error;
-      return ConvertFileTimeToString2(localFileTime, true, full);
+      return ConvertFileTimeToString(localFileTime, true, full);
     }
     case kpidCRC:
     {
       if(propVariant.vt != VT_UI4)
         break;
-      TCHAR temp[17];
-      wsprintf(temp, TEXT("%08X"), propVariant.ulVal);
-      return GetUnicodeString(temp);
+      wchar_t temp[12];
+      ConvertUInt32ToHex(propVariant.ulVal, temp);
+      return temp;
     }
     case kpidAttributes:
     {
       if(propVariant.vt != VT_UI4)
         break;
       UString result;
-      UINT32 attributes = propVariant.ulVal;
+      UInt32 attributes = propVariant.ulVal;
       if (NFile::NFind::NAttributes::IsReadOnly(attributes)) result += L'R';
       if (NFile::NFind::NAttributes::IsHidden(attributes)) result += L'H';
       if (NFile::NFind::NAttributes::IsSystem(attributes)) result += L'S';
@@ -67,12 +78,12 @@ UString ConvertPropertyToString(const PROPVARIANT &propVariant,
     {
       if(propVariant.vt != VT_UI4)
         break;
-      UINT32 size = propVariant.ulVal;
+      UInt32 size = propVariant.ulVal;
       if (size % (1 << 20) == 0)
-        return ConvertUINT32ToString(size >> 20) + L"MB";
+        return ConvertUInt32ToString(size >> 20) + L"MB";
       if (size % (1 << 10) == 0)
-        return ConvertUINT32ToString(size >> 10) + L"KB";
-      return ConvertUINT32ToString(size);
+        return ConvertUInt32ToString(size >> 10) + L"KB";
+      return ConvertUInt32ToString(size);
     }
   }
   return ConvertPropVariantToString(propVariant);

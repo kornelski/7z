@@ -22,7 +22,6 @@
 // {23170F69-40C1-278B-0401-080000000100}
 DEFINE_GUID(CLSID_CCompressDeflateEncoder, 
 0x23170F69, 0x40C1, 0x278B, 0x04, 0x01, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00);
-extern CSysString GetBaseFolderPrefix();
 #include "../Common/CoderLoader.h"
 extern CSysString GetDeflateCodecPath();
 #endif
@@ -30,17 +29,17 @@ extern CSysString GetDeflateCodecPath();
 namespace NArchive {
 namespace NGZip {
 
-static const BYTE kHostOS = NFileHeader::NHostOS::kFAT;
+static const Byte kHostOS = NFileHeader::NHostOS::kFAT;
 
 HRESULT UpdateArchive(IInStream *inStream, 
-    UINT64 unpackSize,
-    IOutStream *outStream,
+    UInt64 unpackSize,
+    ISequentialOutStream *outStream,
     const CItem &newItem,
     const CCompressionMethodMode &compressionMethod,
     int indexInClient,
     IArchiveUpdateCallback *updateCallback)
 {
-  UINT64 complexity = 0;
+  UInt64 complexity = 0;
 
   complexity += unpackSize;
 
@@ -54,11 +53,11 @@ HRESULT UpdateArchive(IInStream *inStream,
   complexity = 0;
   RINOK(updateCallback->SetCompleted(&complexity));
 
-  CMyComPtr<IInStream> fileInStream;
+  CMyComPtr<ISequentialInStream> fileInStream;
 
   RINOK(updateCallback->GetStream(indexInClient, &fileInStream));
 
-  CInStreamWithCRC *inStreamSpec = new CInStreamWithCRC;
+  CSequentialInStreamWithCRC *inStreamSpec = new CSequentialInStreamWithCRC;
   CMyComPtr<ISequentialInStream> crcStream(inStreamSpec);
   inStreamSpec->Init(fileInStream);
 
@@ -74,7 +73,7 @@ HRESULT UpdateArchive(IInStream *inStream,
   outArchive.Create(outStream);
 
   CItem item = newItem;
-  item.CompressionMethod = NFileHeader::NCompressionMethod::kDefalate;
+  item.CompressionMethod = NFileHeader::NCompressionMethod::kDeflate;
   item.ExtraFlags = 0;
   item.HostOS = kHostOS;
 
@@ -101,10 +100,10 @@ HRESULT UpdateArchive(IInStream *inStream,
   }
   RINOK(deflateEncoder->Code(crcStream, outStream, NULL, NULL, compressProgress));
 
-  RINOK(outArchive.WritePostInfo(inStreamSpec->GetCRC(), 
-      (UINT32)inStreamSpec->GetSize()));
-  return updateCallback->SetOperationResult(
-      NArchive::NUpdate::NOperationResult::kOK);
+  item.FileCRC = inStreamSpec->GetCRC();
+  item.UnPackSize32 = (UInt32)inStreamSpec->GetSize();
+  RINOK(outArchive.WritePostHeader(item));
+  return updateCallback->SetOperationResult(NArchive::NUpdate::NOperationResult::kOK);
 }
 
 }}

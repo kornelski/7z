@@ -1,12 +1,11 @@
 // Archive/GZipItem.h
 
-#pragma once
-
 #ifndef __ARCHIVE_GZIP_ITEM_H
 #define __ARCHIVE_GZIP_ITEM_H
 
 #include "Common/Types.h"
 #include "Common/String.h"
+#include "Common/Buffer.h"
 
 namespace NArchive {
 namespace NGZip {
@@ -14,20 +13,19 @@ namespace NGZip {
 class CItem
 {
 private:
-  bool TestFlag(BYTE flag) const { return ((Flags & flag) != 0); }
+  bool TestFlag(Byte flag) const { return ((Flags & flag) != 0); }
 public:
-  BYTE CompressionMethod;
-  BYTE Flags;
-  UINT32 Time;
-  BYTE ExtraFlags;
-  BYTE HostOS;
-  UINT32 FileCRC;
-  UINT32 UnPackSize32;
-  UINT64 PackSize;
+  Byte CompressionMethod;
+  Byte Flags;
+  UInt32 Time;
+  Byte ExtraFlags;
+  Byte HostOS;
+  UInt32 FileCRC;
+  UInt32 UnPackSize32;
 
   AString Name;
-  UINT16 ExtraFieldSize;
-  UINT16 CommentSize;
+  AString Comment;
+  CByteBuffer Extra;
 
   bool IsText() const
     {  return TestFlag(NFileHeader::NFlags::kDataIsText); }
@@ -47,19 +45,15 @@ public:
     else
       Flags &= (~NFileHeader::NFlags::kNameIsPresent);
   }
-};
 
-class CItemEx: public CItem
-{
-public:
-  UINT64 DataPosition;
-  UINT64 CommentPosition;
-  UINT64 ExtraPosition;
+  void Clear()
+  {
+    Name.Empty();
+    Comment.Empty();;
+    Extra.SetCapacity(0);
+  }
 };
-
 
 }}
 
 #endif
-
-

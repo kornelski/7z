@@ -1,9 +1,9 @@
 // MyCom.h
 
-// #pragma once
-
 #ifndef __MYCOM_H
 #define __MYCOM_H
+
+#include "MyWindows.h"
 
 #define RINOK(x) { HRESULT __result_ = (x); if(__result_ != S_OK) return __result_; }
 
@@ -50,10 +50,12 @@ public:
     _p = NULL;
     return pt;
   }
+  #ifdef _WIN32
   HRESULT CoCreateInstance(REFCLSID rclsid, REFIID iid, LPUNKNOWN pUnkOuter = NULL, DWORD dwClsContext = CLSCTX_ALL)
   {
     return ::CoCreateInstance(rclsid, pUnkOuter, dwClsContext, iid, (void**)&_p);
   }
+  #endif
   /*
   HRESULT CoCreateInstance(LPCOLESTR szProgID, LPUNKNOWN pUnkOuter = NULL, DWORD dwClsContext = CLSCTX_ALL)
   {
@@ -146,8 +148,10 @@ public:
 
 #define MY_QUERYINTERFACE_BEGIN STDMETHOD(QueryInterface) \
     (REFGUID iid, void **outObject) { 
+
 #define MY_QUERYINTERFACE_ENTRY(i) if (iid == IID_ ## i) \
     { *outObject = (void *)(i *)this; AddRef(); return S_OK; }
+
 #define MY_QUERYINTERFACE_END return E_NOINTERFACE; }
 
 #define MY_ADDREF_RELEASE \
@@ -172,16 +176,26 @@ STDMETHOD_(ULONG, Release)() { if (--__m_RefCount != 0)  \
   MY_QUERYINTERFACE_ENTRY(i1) \
   MY_QUERYINTERFACE_ENTRY(i2) \
   )
+
 #define MY_UNKNOWN_IMP3(i1, i2, i3) MY_UNKNOWN_IMP_SPEC( \
   MY_QUERYINTERFACE_ENTRY(i1) \
   MY_QUERYINTERFACE_ENTRY(i2) \
   MY_QUERYINTERFACE_ENTRY(i3) \
   )
+
 #define MY_UNKNOWN_IMP4(i1, i2, i3, i4) MY_UNKNOWN_IMP_SPEC( \
   MY_QUERYINTERFACE_ENTRY(i1) \
   MY_QUERYINTERFACE_ENTRY(i2) \
   MY_QUERYINTERFACE_ENTRY(i3) \
   MY_QUERYINTERFACE_ENTRY(i4) \
+  )
+
+#define MY_UNKNOWN_IMP5(i1, i2, i3, i4, i5) MY_UNKNOWN_IMP_SPEC( \
+  MY_QUERYINTERFACE_ENTRY(i1) \
+  MY_QUERYINTERFACE_ENTRY(i2) \
+  MY_QUERYINTERFACE_ENTRY(i3) \
+  MY_QUERYINTERFACE_ENTRY(i4) \
+  MY_QUERYINTERFACE_ENTRY(i5) \
   )
 
 #endif

@@ -1,7 +1,5 @@
 // Archive/cpio/ItemInfo.h
 
-#pragma once
-
 #ifndef __ARCHIVE_CPIO_ITEMINFO_H
 #define __ARCHIVE_CPIO_ITEMINFO_H
 
@@ -17,35 +15,39 @@ namespace NCpio {
 struct CItem
 {
   AString Name;
-  UINT32 inode;
-  UINT32 Mode;
-  UINT32 UID;
-  UINT32 GID;
-  UINT32 Size;
-  time_t ModificationTime;
+  UInt32 inode;
+  UInt32 Mode;
+  UInt32 UID;
+  UInt32 GID;
+  UInt32 Size;
+  UInt32 ModificationTime;
 
   // char LinkFlag;
   // AString LinkName; ?????
   char Magic[8];
-  UINT32 NumLinks;
-  UINT32 DevMajor;
-  UINT32 DevMinor;
-  UINT32 RDevMajor;
-  UINT32 RDevMinor;
-  UINT32 ChkSum;
+  UInt32 NumLinks;
+  UInt32 DevMajor;
+  UInt32 DevMinor;
+  UInt32 RDevMajor;
+  UInt32 RDevMinor;
+  UInt32 ChkSum;
 
-  bool OldHeader;
+  UInt32 Align;
 
   bool IsDirectory() const 
+#ifdef _WIN32
     { return (Mode & _S_IFMT) == _S_IFDIR; }
+#else
+    { return (Mode & S_IFMT) == S_IFDIR; }
+#endif
 };
 
 class CItemEx: public CItem
 {
 public:
-  UINT64 HeaderPosition;
-  UINT32 HeaderSize;
-  UINT64 GetDataPosition() const { return HeaderPosition + HeaderSize; };
+  UInt64 HeaderPosition;
+  UInt32 HeaderSize;
+  UInt64 GetDataPosition() const { return HeaderPosition + HeaderSize; };
 };
 
 }}

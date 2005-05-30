@@ -2,8 +2,7 @@
 
 #include "StdAfx.h"
 
-#define INITGUID
-
+#include "Common/MyInitGuid.h"
 #include "Common/ComTry.h"
 #include "Windows/PropVariant.h"
 #include "CabHandler.h"
@@ -60,6 +59,13 @@ STDAPI GetHandlerProperty(PROPID propID, PROPVARIANT *value)
     case NArchive::kKeepName:
       propVariant = false;
       break;
+    case NArchive::kStartSignature:
+    {
+      const char sig[] = { 0x4D, 0x53, 0x43, 0x46 };
+      if ((value->bstrVal = ::SysAllocStringByteLen(sig, 4)) != 0)
+        value->vt = VT_BSTR;
+      return S_OK;
+    }
   }
   propVariant.Detach(value);
   return S_OK;

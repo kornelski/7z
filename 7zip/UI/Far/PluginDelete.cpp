@@ -2,6 +2,8 @@
 
 #include "StdAfx.h"
 
+#include <stdio.h>
+
 #include "Plugin.h"
 #include "Messages.h"
 #include "UpdateCallback100.h"
@@ -14,10 +16,7 @@
 
 #include "../Common/ZipRegistry.h"
 #include "../Common/WorkDir.h"
-// #include "../Common/OpenEngine2.h"
 
-
-using namespace std;
 using namespace NFar;
 using namespace NWindows;
 using namespace NFile;
@@ -109,7 +108,7 @@ int CPlugin::DeleteFiles(PluginPanelItem *panelItems, int numItems,
   }
   outArchive->SetFolder(_folder);
 
-  CUpdateCallBack100Imp *updateCallbackSpec = new CUpdateCallBack100Imp;
+  CUpdateCallback100Imp *updateCallbackSpec = new CUpdateCallback100Imp;
   CMyComPtr<IFolderArchiveUpdateCallback> updateCallback(updateCallbackSpec );
   
   updateCallbackSpec->Init(m_ArchiveHandler, &progressBox);
@@ -164,6 +163,7 @@ int CPlugin::DeleteFiles(PluginPanelItem *panelItems, int numItems,
       break;
     _folder = newFolder;
   }
+  GetCurrentDir();
 
   return(TRUE);
 }

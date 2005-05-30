@@ -1,13 +1,11 @@
 // Common/StdInStream.h
 
-#pragma once 
-
 #ifndef __COMMON_STDINSTREAM_H
 #define __COMMON_STDINSTREAM_H
 
 #include <stdio.h>
 
-#include "String.h"
+#include "Common/String.h"
 #include "Types.h"
 
 class CStdInStream 

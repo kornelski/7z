@@ -1,7 +1,5 @@
 // Common/CommandLineParser.h
 
-#pragma once
-
 #ifndef __COMMON_COMMANDLINEPARSER_H
 #define __COMMON_COMMANDLINEPARSER_H
 

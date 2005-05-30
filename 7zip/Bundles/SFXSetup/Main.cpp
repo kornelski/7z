@@ -20,7 +20,10 @@
 #include "../../Archive/IArchive.h"
 #include "../../UI/Explorer/MyMessages.h"
 
+// #include "../../UI/GUI/ExtractGUI.h"
+
 #include "ExtractEngine.h"
+
 
 HINSTANCE g_hInstance;
 
@@ -37,25 +40,25 @@ static bool ReadDataString(LPCWSTR fileName, LPCSTR startID,
     return false;
   const int kBufferSize = (1 << 12);
 
-  BYTE buffer[kBufferSize];
+  Byte buffer[kBufferSize];
   int signatureStartSize = lstrlenA(startID);
   int signatureEndSize = lstrlenA(endID);
   
-  UINT32 numBytesPrev = 0;
+  UInt32 numBytesPrev = 0;
   bool writeMode = false;
-  UINT64 posTotal = 0;
+  UInt64 posTotal = 0;
   while(true)
   {
     if (posTotal > (1 << 20))
       return (stringResult.IsEmpty());
-    UINT32 numReadBytes = kBufferSize - numBytesPrev;
-    UINT32 processedSize;
+    UInt32 numReadBytes = kBufferSize - numBytesPrev;
+    UInt32 processedSize;
     if (!inFile.Read(buffer + numBytesPrev, numReadBytes, processedSize))
       return false;
     if (processedSize == 0)
       return true;
-    UINT32 numBytesInBuffer = numBytesPrev + processedSize;
-    UINT32 pos = 0;
+    UInt32 numBytesInBuffer = numBytesPrev + processedSize;
+    UInt32 pos = 0;
     while (true)
     { 
       if (writeMode)
@@ -123,6 +126,7 @@ int APIENTRY WinMain(
 {
   InitCommonControls();
   g_hInstance = (HINSTANCE)hInstance;
+
   UString archiveName, switches;
   NCommandLineParser::SplitCommandLine(GetCommandLineW(), archiveName, switches);
 
@@ -144,6 +148,9 @@ int APIENTRY WinMain(
     switches.Trim();
   }
 
+#ifdef _SHELL_EXECUTE
+  bool executeMode = false;
+#endif
   UString appLaunched;
   if (!config.IsEmpty())
   {
@@ -163,6 +170,13 @@ int APIENTRY WinMain(
         return 0;
     }
     appLaunched = GetTextConfigValue(pairs, L"RunProgram");
+#ifdef _SHELL_EXECUTE
+    if (appLaunched.IsEmpty())
+    {
+      executeMode = true;
+      appLaunched = GetTextConfigValue(pairs, L"Execute");
+    }
+#endif
   }
 
   NFile::NDirectory::CTempDirectory tempDir;
@@ -172,64 +186,110 @@ int APIENTRY WinMain(
     return 1;
   }
 
-  HRESULT result = ExtractArchive(fullPath, GetUnicodeString(tempDir.GetPath()));
+  COpenCallbackGUI openCallback;
+
+  UString tempDirPath = GetUnicodeString(tempDir.GetPath());
+  HRESULT result = ExtractArchive(fullPath, tempDirPath, &openCallback);
+
   if (result != S_OK)
   {
     if (result == S_FALSE)
       MyMessageBox(L"Can not open archive");
     else if (result != E_ABORT)
       ShowErrorMessage(result);
-    return  1;
+    return 1;
   }
 
   CCurrentDirRestorer currentDirRestorer;
 
   if (!SetCurrentDirectory(tempDir.GetPath()))
     return 1;
-
   
   if (appLaunched.IsEmpty())
   {
-    appLaunched = L"Setup.exe";
+    appLaunched = L"setup.exe";
     if (!NFile::NFind::DoesFileExist(GetSystemString(appLaunched)))
+    {
+      MyMessageBox(L"Can not find setup.exe");
       return 1;
+    }
   }
-  STARTUPINFO startupInfo;
-  startupInfo.cb = sizeof(startupInfo);
-  startupInfo.lpReserved = 0;
-  startupInfo.lpDesktop = 0;
-  startupInfo.lpTitle = 0;
-  startupInfo.dwFlags = 0;
-  startupInfo.cbReserved2 = 0;
-  startupInfo.lpReserved2 = 0;
-  
-  PROCESS_INFORMATION processInformation;
 
-  CSysString shortPath;
-  if (!NFile::NDirectory::MyGetShortPathName(tempDir.GetPath(), shortPath))
-    return 1;
+  {
+    UString s2 = tempDirPath;
+    NFile::NName::NormalizeDirPathPrefix(s2);
+    appLaunched.Replace(L"%%T\\", s2);
+  }
 
-  UString appLaunchedSysU = appLaunched;
-  appLaunchedSysU.Replace(TEXT(L"%%T"), GetUnicodeString(shortPath));
+  appLaunched.Replace(L"%%T", tempDirPath);
 
-  appLaunchedSysU += L' ';
-  appLaunchedSysU += switches;
-  
-  CSysString tempDirPathNormalized = shortPath;
-  NFile::NName::NormalizeDirPathPrefix(shortPath);
-  // CSysString appLaunchedSys = shortPath + GetSystemString(appLaunchedSysU);
-  CSysString appLaunchedSys = CSysString(TEXT(".\\")) + GetSystemString(appLaunchedSysU);
-  
-  BOOL createResult = CreateProcess(NULL, (LPTSTR)(LPCTSTR)appLaunchedSys, 
+
+  HANDLE hProcess = 0;
+#ifdef _SHELL_EXECUTE
+  if (executeMode)
+  {
+    CSysString filePath = GetSystemString(appLaunched);
+    SHELLEXECUTEINFO execInfo;
+    execInfo.cbSize = sizeof(execInfo);
+    execInfo.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_DDEWAIT;
+    execInfo.hwnd = NULL;
+    execInfo.lpVerb = NULL;
+    execInfo.lpFile = filePath;
+
+    CSysString switchesSys = GetSystemString(switches);
+    if (switchesSys.IsEmpty())
+      execInfo.lpParameters = NULL;
+    else
+      execInfo.lpParameters = switchesSys;
+
+    execInfo.lpDirectory = NULL;
+    execInfo.nShow = SW_SHOWNORMAL;
+    execInfo.hProcess = 0;
+    bool success = BOOLToBool(::ShellExecuteEx(&execInfo));
+    result = (UINT32)execInfo.hInstApp;
+    if(result <= 32)
+    {
+      MyMessageBox(L"Can not open file");
+      return 1;
+    }
+    hProcess = execInfo.hProcess;
+  }
+  else
+#endif
+  {
+    if (!switches.IsEmpty())
+    {
+      appLaunched += L' ';
+      appLaunched += switches;
+    }
+    STARTUPINFO startupInfo;
+    startupInfo.cb = sizeof(startupInfo);
+    startupInfo.lpReserved = 0;
+    startupInfo.lpDesktop = 0;
+    startupInfo.lpTitle = 0;
+    startupInfo.dwFlags = 0;
+    startupInfo.cbReserved2 = 0;
+    startupInfo.lpReserved2 = 0;
+    
+    PROCESS_INFORMATION processInformation;
+    
+    CSysString appLaunchedSys = CSysString(TEXT(".\\")) + GetSystemString(appLaunched);
+    
+    BOOL createResult = CreateProcess(NULL, (LPTSTR)(LPCTSTR)appLaunchedSys, 
       NULL, NULL, FALSE, 0, NULL, NULL /*tempDir.GetPath() */, 
       &startupInfo, &processInformation);
-  if (createResult == 0)
-  {
-    ShowLastErrorMessage();
-    return 1;
+    if (createResult == 0)
+    {
+      ShowLastErrorMessage();
+      return 1;
+    }
+    ::CloseHandle(processInformation.hThread);
+    hProcess = processInformation.hProcess;
   }
-  WaitForSingleObject(processInformation.hProcess, INFINITE);
-  ::CloseHandle(processInformation.hThread);
-  ::CloseHandle(processInformation.hProcess);
+  if (hProcess != 0)
+  {
+    WaitForSingleObject(hProcess, INFINITE);
+    ::CloseHandle(hProcess);
+  }
   return 0;
 }

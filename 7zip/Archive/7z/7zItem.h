@@ -1,7 +1,5 @@
 // 7zItem.h
 
-#pragma once
-
 #ifndef __7Z_ITEM_H
 #define __7Z_ITEM_H
 
@@ -18,38 +16,36 @@ struct CAltCoderInfo
   CByteBuffer Properties;
 };
 
+typedef UInt32 CNum;
+const CNum kNumMax     = 0x7FFFFFFF;
+const CNum kNumNoIndex = 0xFFFFFFFF;
+
 struct CCoderInfo
 {
-  UINT64 NumInStreams;
-  UINT64 NumOutStreams;
+  CNum NumInStreams;
+  CNum NumOutStreams;
   CObjectVector<CAltCoderInfo> AltCoders;
-  bool IsSimpleCoder() const 
-    { return (NumInStreams == 1) && (NumOutStreams == 1); }
-};
-
-struct CPackStreamInfo
-{
-  UINT64 Index;
+  bool IsSimpleCoder() const { return (NumInStreams == 1) && (NumOutStreams == 1); }
 };
 
 struct CBindPair
 {
-  UINT64 InIndex;
-  UINT64 OutIndex;
+  CNum InIndex;
+  CNum OutIndex;
 };
 
 struct CFolder
 {
   CObjectVector<CCoderInfo> Coders;
   CRecordVector<CBindPair> BindPairs;
-  CRecordVector<CPackStreamInfo> PackStreams;
-  CRecordVector<UINT64> UnPackSizes;
+  CRecordVector<CNum> PackStreams;
+  CRecordVector<UInt64> UnPackSizes;
+  UInt32 UnPackCRC;
   bool UnPackCRCDefined;
-  UINT32 UnPackCRC;
 
   CFolder(): UnPackCRCDefined(false) {}
 
-  UINT64 GetUnPackSize() const // test it
+  UInt64 GetUnPackSize() const // test it
   { 
     if (UnPackSizes.IsEmpty())
       return 0;
@@ -58,33 +54,33 @@ struct CFolder
         return UnPackSizes[i];
     throw 1;
   }
-  UINT64 GetNumOutStreams() const
+
+  CNum GetNumOutStreams() const
   {
-    UINT64 result = 0;
+    CNum result = 0;
     for (int i = 0; i < Coders.Size(); i++)
       result += Coders[i].NumOutStreams;
     return result;
   }
 
-
-  int FindBindPairForInStream(int inStreamIndex) const
+  int FindBindPairForInStream(CNum inStreamIndex) const
   {
     for(int i = 0; i < BindPairs.Size(); i++)
       if (BindPairs[i].InIndex == inStreamIndex)
         return i;
     return -1;
   }
-  int FindBindPairForOutStream(int outStreamIndex) const
+  int FindBindPairForOutStream(CNum outStreamIndex) const
   {
     for(int i = 0; i < BindPairs.Size(); i++)
       if (BindPairs[i].OutIndex == outStreamIndex)
         return i;
     return -1;
   }
-  int FindPackStreamArrayIndex(int inStreamIndex) const
+  int FindPackStreamArrayIndex(CNum inStreamIndex) const
   {
     for(int i = 0; i < PackStreams.Size(); i++)
-      if (PackStreams[i].Index == inStreamIndex)
+      if (PackStreams[i] == inStreamIndex)
         return i;
     return -1;
   }
@@ -98,51 +94,54 @@ public:
   CArchiveFileTime CreationTime;
   CArchiveFileTime LastWriteTime;
   CArchiveFileTime LastAccessTime;
-  UINT64 UnPackSize;
-  UINT32 Attributes;
-  UINT32 FileCRC;
+  UInt64 UnPackSize;
+  UInt64 StartPos;
+  UInt32 Attributes;
+  UInt32 FileCRC;
   UString Name;
 
   bool HasStream; // Test it !!! it means that there is 
                   // stream in some folder. It can be empty stream
   bool IsDirectory;
   bool IsAnti;
-  bool FileCRCIsDefined;
+  bool IsFileCRCDefined;
   bool AreAttributesDefined;
   bool IsCreationTimeDefined;
   bool IsLastWriteTimeDefined;
   bool IsLastAccessTimeDefined;
+  bool IsStartPosDefined;
 
   /*
   const bool HasStream() const { 
       return !IsDirectory && !IsAnti && UnPackSize != 0; }
   */
   CFileItem(): 
+    HasStream(true),
+    IsDirectory(false),
+    IsAnti(false),
+    IsFileCRCDefined(false),
     AreAttributesDefined(false), 
     IsCreationTimeDefined(false), 
     IsLastWriteTimeDefined(false), 
     IsLastAccessTimeDefined(false),
-    IsDirectory(false),
-    FileCRCIsDefined(false),
-    IsAnti(false),
-    HasStream(true)
+    IsStartPosDefined(false)
       {}
-  void SetAttributes(UINT32 attributes) 
+  void SetAttributes(UInt32 attributes) 
   { 
     AreAttributesDefined = true;
     Attributes = attributes;
   }
-  void SetCreationTime(CArchiveFileTime creationTime) 
+  void SetCreationTime(const CArchiveFileTime &creationTime) 
   { 
     IsCreationTimeDefined = true;
     CreationTime = creationTime;
   }
-  void SetLastWriteTime(CArchiveFileTime lastWriteTime) 
+  void SetLastWriteTime(const CArchiveFileTime &lastWriteTime) 
   {
     IsLastWriteTimeDefined = true;
     LastWriteTime = lastWriteTime;
   }
-  void SetLastAccessTime(CArchiveFileTime lastAccessTime) 
+  void SetLastAccessTime(const CArchiveFileTime &lastAccessTime) 
   { 
     IsLastAccessTimeDefined = true;
     LastAccessTime = lastAccessTime;
@@ -151,11 +150,11 @@ public:
 
 struct CArchiveDatabase
 {
-  CRecordVector<UINT64> PackSizes;
+  CRecordVector<UInt64> PackSizes;
   CRecordVector<bool> PackCRCsDefined;
-  CRecordVector<UINT32> PackCRCs;
+  CRecordVector<UInt32> PackCRCs;
   CObjectVector<CFolder> Folders;
-  CRecordVector<UINT64> NumUnPackStreamsVector;
+  CRecordVector<CNum> NumUnPackStreamsVector;
   CObjectVector<CFileItem> Files;
   void Clear()
   {
@@ -174,19 +173,6 @@ struct CArchiveDatabase
       Folders.IsEmpty() && 
       NumUnPackStreamsVector.IsEmpty() && 
       Files.IsEmpty());
-  }
-};
-
-struct CArchiveHeaderDatabase
-{
-  CRecordVector<UINT64> PackSizes;
-  CObjectVector<CFolder> Folders;
-  CRecordVector<UINT32> CRCs;
-  void Clear()
-  {
-    PackSizes.Clear();
-    Folders.Clear();
-    CRCs.Clear();
   }
 };
 

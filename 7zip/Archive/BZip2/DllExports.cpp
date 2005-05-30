@@ -2,10 +2,8 @@
 
 #include "StdAfx.h"
 
-#define INITGUID
-
+#include "Common/MyInitGuid.h"
 #include "Common/ComTry.h"
-#include "Common/String.h"
 #include "Windows/PropVariant.h"
 #include "BZip2Handler.h"
 #include "../../ICoder.h"
@@ -99,6 +97,14 @@ STDAPI GetHandlerProperty(PROPID propID, PROPVARIANT *value)
     case NArchive::kKeepName:
       propVariant = true;
       break;
+    case NArchive::kStartSignature:
+    {
+      const char sig[] = { 'B', 'Z', 'h' };
+      if ((value->bstrVal = ::SysAllocStringByteLen(sig, 3)) != 0)
+        value->vt = VT_BSTR;
+      return S_OK;
+    }
+
   }
   propVariant.Detach(value);
   return S_OK;

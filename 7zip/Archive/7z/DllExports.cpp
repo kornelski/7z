@@ -2,13 +2,12 @@
 
 #include "StdAfx.h"
 
-#include <initguid.h>
+#include "../../../Common/MyInitGuid.h"
+#include "../../../Common/ComTry.h"
+
+#include "../../ICoder.h"
 
 #include "7zHandler.h"
-#include "../../ICoder.h"
-#include "../../IPassword.h"
-#include "../../../Common/NewHandler.h"
-#include "../../../Common/ComTry.h"
 
 #ifndef EXCLUDE_COM
 // {23170F69-40C1-278B-06F1-070100000100}
@@ -38,22 +37,18 @@ STDAPI CreateObject(
   *outObject = 0;
   if (*classID != NArchive::N7z::CLSID_CFormat7z)
     return CLASS_E_CLASSNOTAVAILABLE;
-  int needIn = *interfaceID == IID_IInArchive;
-  int needOut = *interfaceID == IID_IOutArchive;
-  if (needIn || needOut)
+  if (*interfaceID == IID_IInArchive)
   {
-    NArchive::N7z::CHandler *temp = new NArchive::N7z::CHandler;
-    if (needIn)
-    {
-      CMyComPtr<IInArchive> inArchive = (IInArchive *)temp;
-      *outObject = inArchive.Detach();
-    }
-    else
-    {
-      CMyComPtr<IOutArchive> outArchive = (IOutArchive *)temp;
-      *outObject = outArchive.Detach();
-    }
+    CMyComPtr<IInArchive> inArchive = new NArchive::N7z::CHandler;
+    *outObject = inArchive.Detach();
   }
+  #ifndef EXTRACT_ONLY
+  else if (*interfaceID == IID_IOutArchive)
+  {
+    CMyComPtr<IOutArchive> outArchive = new NArchive::N7z::CHandler;
+    *outObject = outArchive.Detach();
+  }
+  #endif
   else
     return E_NOINTERFACE;
   COM_TRY_END
@@ -84,6 +79,13 @@ STDAPI GetHandlerProperty(PROPID propID, PROPVARIANT *value)
     case NArchive::kKeepName:
       propVariant = false;
       break;
+    case NArchive::kStartSignature:
+    {
+      if ((value->bstrVal = ::SysAllocStringByteLen((const char *)NArchive::N7z::kSignature, 
+          NArchive::N7z::kSignatureSize)) != 0)
+        value->vt = VT_BSTR;
+      return S_OK;
+    }
   }
   propVariant.Detach(value);
   return S_OK;

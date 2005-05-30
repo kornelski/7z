@@ -11,7 +11,6 @@
 #include "SortUtils.h"
 
 using namespace NWindows;
-// using namespace NCOM;
 using namespace NTime;
 
 static int MyCompareTime(NFileTimeType::EEnum fileTimeType, 
@@ -23,7 +22,7 @@ static int MyCompareTime(NFileTimeType::EEnum fileTimeType,
       return ::CompareFileTime(&time1, &time2);
     case NFileTimeType::kUnix:
       {
-        time_t unixTime1, unixTime2;
+        UInt32 unixTime1, unixTime2;
         if (!FileTimeToUnixTime(time1, unixTime1))
           throw 4191614;
         if (!FileTimeToUnixTime(time2, unixTime2))
@@ -32,7 +31,7 @@ static int MyCompareTime(NFileTimeType::EEnum fileTimeType,
       }
     case NFileTimeType::kDOS:
       {
-        UINT32 dosTime1, dosTime2;
+        UInt32 dosTime1, dosTime2;
         if (!FileTimeToDosTime(time1, dosTime1))
           throw 4191616;
         if (!FileTimeToDosTime(time2, dosTime2))
@@ -51,23 +50,32 @@ static const char *kSameTimeChangedSizeCollisionMessaged =
     "Collision between files with same date/time and different sizes:\n";
 */
 
-static void TestDuplicateString(const UStringVector &strings, 
-    const CIntVector &indices)
+static inline int MyFileNameCompare(const UString &s1, const UString &s2)
+{
+  return 
+  #ifdef _WIN32
+  s1.CollateNoCase(s2);
+  #else
+  s1.Compare(s2);
+  #endif
+}
+
+static void TestDuplicateString(const UStringVector &strings, const CIntVector &indices)
 {
   for(int i = 0; i + 1 < indices.Size(); i++)
-    if (strings[indices[i]].CollateNoCase(strings[indices[i + 1]]) == 0)
+    if (MyFileNameCompare(strings[indices[i]], strings[indices[i + 1]]) == 0)
     {
       UString message = kDuplicateFileNameMessage;
       message += L"\n";
       message += strings[indices[i]];
       message += L"\n";
-      message += strings[indices[i+1]];
+      message += strings[indices[i + 1]];
       throw message;
     }
 }
 
 void GetUpdatePairInfoList(
-    const CObjectVector<CDirItem>  &dirItems, 
+    const CObjectVector<CDirItem> &dirItems, 
     const CObjectVector<CArchiveItem> &archiveItems,
     NFileTimeType::EEnum fileTimeType,
     CObjectVector<CUpdatePair> &updatePairs)
@@ -96,7 +104,7 @@ void GetUpdatePairInfoList(
         archiveItemIndex2 = archiveIndices[archiveItemIndex]; 
     const CDirItem &dirItem = dirItems[dirItemIndex2];
     const CArchiveItem &archiveItem = archiveItems[archiveItemIndex2];
-    int compareResult = dirItem.Name.CollateNoCase(archiveItem.Name);
+    int compareResult = MyFileNameCompare(dirItem.Name, archiveItem.Name);
     if (compareResult < 0)
     {
         pair.State = NUpdateArchive::NPairState::kOnlyOnDisk;

@@ -43,7 +43,7 @@ RSC=rc.exe
 # PROP Ignore_Export_Lib 1
 # PROP Target_Dir ""
 # ADD BASE CPP /nologo /MT /W3 /GX /O2 /D "WIN32" /D "NDEBUG" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "ZIP_EXPORTS" /YX /FD /c
-# ADD CPP /nologo /Gz /MD /W3 /GX /O1 /I "..\..\..\\" /D "NDEBUG" /D "WIN32" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "ZIP_EXPORTS" /D "CRYPTO_ZIP" /Yu"StdAfx.h" /FD /c
+# ADD CPP /nologo /Gz /MD /W3 /GX /O1 /I "..\..\..\\" /D "NDEBUG" /D "WIN32" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "ZIP_EXPORTS" /Yu"StdAfx.h" /FD /c
 # ADD BASE MTL /nologo /D "NDEBUG" /mktyplib203 /win32
 # ADD MTL /nologo /D "NDEBUG" /mktyplib203 /win32
 # ADD BASE RSC /l 0x419 /d "NDEBUG"
@@ -70,7 +70,7 @@ LINK32=link.exe
 # PROP Ignore_Export_Lib 1
 # PROP Target_Dir ""
 # ADD BASE CPP /nologo /MTd /W3 /Gm /GX /ZI /Od /D "WIN32" /D "_DEBUG" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "ZIP_EXPORTS" /YX /FD /GZ /c
-# ADD CPP /nologo /Gz /MTd /W3 /Gm /GX /ZI /Od /I "..\..\..\\" /D "_DEBUG" /D "WIN32" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "ZIP_EXPORTS" /D "CRYPTO_ZIP" /Yu"StdAfx.h" /FD /GZ /c
+# ADD CPP /nologo /Gz /MTd /W3 /Gm /GX /ZI /Od /I "..\..\..\\" /D "_DEBUG" /D "WIN32" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "ZIP_EXPORTS" /Yu"StdAfx.h" /FD /GZ /c
 # ADD BASE MTL /nologo /D "_DEBUG" /mktyplib203 /win32
 # ADD MTL /nologo /D "_DEBUG" /mktyplib203 /win32
 # ADD BASE RSC /l 0x419 /d "_DEBUG"
@@ -120,6 +120,22 @@ SOURCE=.\Zip.def
 # Begin Group "Common"
 
 # PROP Default_Filter ""
+# Begin Source File
+
+SOURCE=..\..\..\Common\Alloc.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\..\Common\Alloc.h
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\..\Common\AutoPtr.h
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\..\Common\Buffer.h
+# End Source File
 # Begin Source File
 
 SOURCE=..\..\..\Common\CRC.cpp
@@ -218,15 +234,11 @@ SOURCE=..\Common\CodecsPath.h
 # End Source File
 # Begin Source File
 
+SOURCE=..\Common\CoderLoader.cpp
+# End Source File
+# Begin Source File
+
 SOURCE=..\Common\CoderLoader.h
-# End Source File
-# Begin Source File
-
-SOURCE=..\Common\CoderMixer.cpp
-# End Source File
-# Begin Source File
-
-SOURCE=..\Common\CoderMixer.h
 # End Source File
 # Begin Source File
 
@@ -235,6 +247,14 @@ SOURCE=..\Common\CrossThreadProgress.cpp
 # Begin Source File
 
 SOURCE=..\Common\CrossThreadProgress.h
+# End Source File
+# Begin Source File
+
+SOURCE=..\Common\FilterCoder.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\Common\FilterCoder.h
 # End Source File
 # Begin Source File
 
@@ -266,6 +286,14 @@ SOURCE=..\Common\OutStreamWithCRC.h
 # PROP Default_Filter ""
 # Begin Source File
 
+SOURCE=..\..\Common\InBuffer.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\Common\InBuffer.h
+# End Source File
+# Begin Source File
+
 SOURCE=..\..\Common\LimitedStreams.cpp
 # End Source File
 # Begin Source File
@@ -274,11 +302,27 @@ SOURCE=..\..\Common\LimitedStreams.h
 # End Source File
 # Begin Source File
 
+SOURCE=..\..\Common\LSBFDecoder.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\Common\LSBFDecoder.h
+# End Source File
+# Begin Source File
+
 SOURCE=..\..\Common\OffsetStream.cpp
 # End Source File
 # Begin Source File
 
 SOURCE=..\..\Common\OffsetStream.h
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\Common\OutBuffer.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\Common\OutBuffer.h
 # End Source File
 # Begin Source File
 
@@ -377,22 +421,6 @@ SOURCE=.\ZipUpdate.cpp
 SOURCE=.\ZipUpdate.h
 # End Source File
 # End Group
-# Begin Group "copy"
-
-# PROP Default_Filter ""
-# Begin Source File
-
-SOURCE=..\..\Compress\Copy\CopyCoder.cpp
-# End Source File
-# Begin Source File
-
-SOURCE=..\..\Compress\Copy\CopyCoder.h
-# End Source File
-# End Group
-# Begin Group "Format Common"
-
-# PROP Default_Filter ""
-# End Group
 # Begin Group "Crypto"
 
 # PROP Default_Filter ""
@@ -418,6 +446,14 @@ SOURCE=..\..\Crypto\Zip\ZipCrypto.h
 # PROP Default_Filter ""
 # Begin Source File
 
+SOURCE=..\7z\7zMethodID.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\7z\7zMethodID.h
+# End Source File
+# Begin Source File
+
 SOURCE=..\7z\7zMethods.cpp
 # End Source File
 # Begin Source File
@@ -425,17 +461,69 @@ SOURCE=..\7z\7zMethods.cpp
 SOURCE=..\7z\7zMethods.h
 # End Source File
 # End Group
+# Begin Group "Compress"
+
+# PROP Default_Filter ""
+# Begin Group "Shrink"
+
+# PROP Default_Filter ""
 # Begin Source File
 
-SOURCE=".\7-zip.ico"
+SOURCE=..\..\Compress\Shrink\ShrinkDecoder.cpp
 # End Source File
+# Begin Source File
+
+SOURCE=..\..\Compress\Shrink\ShrinkDecoder.h
+# End Source File
+# End Group
+# Begin Group "copy"
+
+# PROP Default_Filter ""
+# Begin Source File
+
+SOURCE=..\..\Compress\Copy\CopyCoder.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\Compress\Copy\CopyCoder.h
+# End Source File
+# End Group
+# Begin Group "Implode"
+
+# PROP Default_Filter ""
+# Begin Source File
+
+SOURCE=..\..\Compress\Implode\ImplodeDecoder.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\Compress\Implode\ImplodeDecoder.h
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\Compress\Implode\ImplodeHuffmanDecoder.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\Compress\Implode\ImplodeHuffmanDecoder.h
+# End Source File
+# End Group
+# Begin Group "LZ"
+
+# PROP Default_Filter ""
+# Begin Source File
+
+SOURCE=..\..\Compress\LZ\LZOutWindow.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\Compress\LZ\LZOutWindow.h
+# End Source File
+# End Group
+# End Group
 # Begin Source File
 
 SOURCE=.\zip.ico
-# End Source File
-# Begin Source File
-
-SOURCE=.\zip1.ico
 # End Source File
 # End Target
 # End Project

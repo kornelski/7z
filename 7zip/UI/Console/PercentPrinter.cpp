@@ -2,7 +2,6 @@
 
 #include "StdAfx.h"
 
-#include "Common/StdOutStream.h"
 #include "Common/IntToString.h"
 #include "Common/String.h"
 
@@ -14,7 +13,7 @@ static const char *kCloseString = "\b\b\b\b    \b\b\b\b";
 static const char *kPercentFormatString1 = "\b\b\b\b";
 static const int kNumDigits = 3;
 
-CPercentPrinter::CPercentPrinter(UINT64 minStepSize):
+CPercentPrinter::CPercentPrinter(UInt64 minStepSize):
   m_MinStepSize(minStepSize),
   m_ScreenPos(0),
   m_StringIsPrinted(false)
@@ -27,53 +26,51 @@ CPercentPrinter::CPercentPrinter(UINT64 minStepSize):
 void CPercentPrinter::PreparePrint()
 {
   if (m_ScreenPos < kNumPercentSpaces)
-    g_StdOut << (m_Spaces + m_ScreenPos);
+    (*OutStream) << (m_Spaces + m_ScreenPos);
   m_ScreenPos  = kNumPercentSpaces;
-  g_StdOut << kPrepareString;
+  (*OutStream) << kPrepareString;
 }
 
 void CPercentPrinter::ClosePrint()
 {
-  g_StdOut << kCloseString;
+  (*OutStream) << kCloseString;
   m_StringIsPrinted = false;
 }
 
 void CPercentPrinter::PrintString(const char *s)
 {
   m_ScreenPos += MyStringLen(s);
-  g_StdOut << s;
+  (*OutStream) << s;
 }
 
 void CPercentPrinter::PrintString(const wchar_t *s)
 {
   m_ScreenPos += MyStringLen(s);
-  g_StdOut << s;
+  (*OutStream) << s;
 }
 
 void CPercentPrinter::PrintNewLine()
 {
   m_ScreenPos = 0;
-  g_StdOut << "\n";
+  (*OutStream) << "\n";
   m_StringIsPrinted = false;
 }
 
-void CPercentPrinter::SetRatio(UINT64 doneValue)
+void CPercentPrinter::SetRatio(UInt64 doneValue)
   { m_CurValue = doneValue; }
 
 void CPercentPrinter::RePrintRatio()
 {
   if (m_Total == 0)
     return;
-  UINT64 ratio = m_CurValue * 100 / m_Total;
-  // char temp[32];
-  // sprintf(temp, kPercentFormatString, ratio);
+  UInt64 ratio = m_CurValue * 100 / m_Total;
   char temp[32 + kNumDigits] = "    "; // for 4 digits;
-  ConvertUINT64ToString(ratio, temp + kNumDigits);
-  int len = lstrlenA(temp + kNumDigits);
-  lstrcatA(temp, "%");
+  ConvertUInt64ToString(ratio, temp + kNumDigits);
+  int len = strlen(temp + kNumDigits);
+  strcat(temp, "%");
   int pos = (len > kNumDigits)? kNumDigits : len;
-  g_StdOut << kPercentFormatString1;
-  g_StdOut << (temp + pos);
+  (*OutStream) << kPercentFormatString1;
+  (*OutStream) << (temp + pos);
   m_PrevValue = m_CurValue;
   m_StringIsPrinted = true;
 }

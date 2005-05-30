@@ -4,21 +4,17 @@
 
 #include "Plugin.h"
 
-// #include "Windows/Time.h"
+#include "Common/StringConvert.h"
+#include "Common/Wildcard.h"
+
+#include "Windows/PropVariantConversions.h"
 #include "Windows/FileName.h"
 #include "Windows/FileDir.h"
 
-#include "Common/StringConvert.h"
-
-#include "Windows/PropVariantConversions.h"
-
-#include "Far/FarUtils.h"
-
 #include "../Common/PropIDUtils.h"
 
-#include "Common/WildCard.h"
-
 #include "Messages.h"
+#include "FarUtils.h"
 
 using namespace NWindows;
 using namespace NFar;
@@ -111,7 +107,7 @@ void CPlugin::ReadPluginPanelItem(PluginPanelItem &panelItem, UINT32 itemIndex)
   if (propVariant.vt == VT_EMPTY)
     length = 0;
   else
-    length = ::ConvertPropVariantToUINT64(propVariant);
+    length = ::ConvertPropVariantToUInt64(propVariant);
   panelItem.FindData.nFileSizeLow = UINT32(length);
   panelItem.FindData.nFileSizeHigh = UINT32(length >> 32);
 
@@ -128,7 +124,7 @@ void CPlugin::ReadPluginPanelItem(PluginPanelItem &panelItem, UINT32 itemIndex)
   if (propVariant.vt == VT_EMPTY)
     length = 0;
   else
-    length = ::ConvertPropVariantToUINT64(propVariant);
+    length = ::ConvertPropVariantToUInt64(propVariant);
   panelItem.PackSize = UINT32(length);
   panelItem.PackSizeHigh = UINT32(length >> 32);
 
@@ -170,7 +166,7 @@ int CPlugin::GetFindData(PluginPanelItem **panelItems,
   *panelItems = new PluginPanelItem[numItems];
   try
   {
-    for(int i = 0; i < numItems; i++)
+    for(UINT32 i = 0; i < numItems; i++)
     {
       PluginPanelItem &panelItem = (*panelItems)[i];
       ReadPluginPanelItem(panelItem, i);
@@ -210,13 +206,13 @@ void CPlugin::EnterToDirectory(const UString &aDirName)
 
 int CPlugin::SetDirectory(const char *aszDir, int opMode)
 {
-  UString aDir = MultiByteToUnicodeString(aszDir, CP_OEMCP);
-  if (aDir == L"\\")
+  UString path = MultiByteToUnicodeString(aszDir, CP_OEMCP);
+  if (path == L"\\")
   {
     _folder.Release();
     m_ArchiveHandler->BindToRootFolder(&_folder);  
   }
-  else if (aDir == L"..")
+  else if (path == L"..")
   {
     CMyComPtr<IFolderFolder> newFolder;
     _folder->BindToParentFolder(&newFolder);  
@@ -224,29 +220,22 @@ int CPlugin::SetDirectory(const char *aszDir, int opMode)
       throw 40312;
     _folder = newFolder;
   }
-  else if (aDir.IsEmpty())
-    EnterToDirectory(aDir);
+  else if (path.IsEmpty())
+    EnterToDirectory(path);
   else
   {
-    if (aDir[0] == L'\\')
+    if (path[0] == L'\\')
     {
       _folder.Release();
       m_ArchiveHandler->BindToRootFolder(&_folder);  
-      aDir = aDir.Mid(1);
+      path = path.Mid(1);
     }
     UStringVector pathParts;
-    SplitPathToParts(aDir, pathParts);
+    SplitPathToParts(path, pathParts);
     for(int i = 0; i < pathParts.Size(); i++)
       EnterToDirectory(pathParts[i]);
   }
-  m_CurrentDir.Empty();
-  UStringVector pathParts;
-  GetPathParts(pathParts);
-  for (int i = 0; i < pathParts.Size(); i++)
-  {
-    m_CurrentDir += L'\\';
-    m_CurrentDir += pathParts[i];
-  }
+  GetCurrentDir();
   return TRUE;
 }
 
@@ -264,6 +253,18 @@ void CPlugin::GetPathParts(UStringVector &pathParts)
     folderItem->GetName(&name);
     pathParts.Insert(0, (const wchar_t *)name);
     folderItem = newFolder;
+  }
+}
+
+void CPlugin::GetCurrentDir()
+{
+  m_CurrentDir.Empty();
+  UStringVector pathParts;
+  GetPathParts(pathParts);
+  for (int i = 0; i < pathParts.Size(); i++)
+  {
+    m_CurrentDir += L'\\';
+    m_CurrentDir += pathParts[i];
   }
 }
 
@@ -302,7 +303,9 @@ static CPROPIDToName kPROPIDToName[] =
   { kpidUser, NMessageID::kUser },
   { kpidGroup, NMessageID::kGroup },
   { kpidBlock, NMessageID::kBlock },
-  { kpidComment, NMessageID::kComment }
+  { kpidComment, NMessageID::kComment },
+  { kpidPosition, NMessageID::kPosition }
+  
 };
 
 static const int kNumPROPIDToName = sizeof(kPROPIDToName) /  sizeof(kPROPIDToName[0]);
@@ -537,7 +540,7 @@ HRESULT CPlugin::ShowAttributesWindow()
   UINT32 numProps;
   RINOK(m_ArchiveHandler->GetNumberOfProperties(&numProps));
   int i;
-  for (i = 0; i < numProps; i++)
+  for (i = 0; i < (int)numProps; i++)
   {
     CMyComBSTR name;
     PROPID propID;

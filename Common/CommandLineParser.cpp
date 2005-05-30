@@ -37,8 +37,8 @@ void SplitCommandLine(const UString &s, UStringVector &parts)
   {
     UString s1, s2;
     SplitCommandLine(sTemp, s1, s2);
-    s1.Trim();
-    s2.Trim();
+    // s1.Trim();
+    // s2.Trim();
     if (!s1.IsEmpty())
       parts.Add(s1);
     if (s2.IsEmpty())
@@ -49,13 +49,14 @@ void SplitCommandLine(const UString &s, UStringVector &parts)
 
 
 static const wchar_t kSwitchID1 = '-';
-static const wchar_t kSwitchID2 = '/';
+// static const wchar_t kSwitchID2 = '/';
 
 static const wchar_t kSwitchMinus = '-';
+static const wchar_t *kStopSwitchParsing = L"--";
 
 static bool IsItSwitchChar(wchar_t c)
 { 
-  return (c == kSwitchID1 || c == kSwitchID2); 
+  return (c == kSwitchID1 /*|| c == kSwitchID2 */); 
 }
 
 CParser::CParser(int numSwitches):
@@ -73,9 +74,19 @@ void CParser::ParseStrings(const CSwitchForm *switchForms,
   const UStringVector &commandStrings)
 {
   int numCommandStrings = commandStrings.Size();
+  bool stopSwitch = false;
   for (int i = 0; i < numCommandStrings; i++)
-    if (!ParseString(commandStrings[i], switchForms))
-      NonSwitchStrings.Add(commandStrings[i]);
+  {
+    const UString &s = commandStrings[i];
+    if (stopSwitch)
+      NonSwitchStrings.Add(s);
+    else
+      if (s == kStopSwitchParsing)
+        stopSwitch = true;
+      else
+        if (!ParseString(s, switchForms))
+          NonSwitchStrings.Add(s);
+  }
 }
 
 // if string contains switch then function updates switch structures
@@ -93,11 +104,11 @@ bool CParser::ParseString(const UString &s, const CSwitchForm *switchForms)
     if (IsItSwitchChar(s[pos]))
       pos++;
     const int kNoLen = -1;
-    int matchedSwitchIndex;
+    int matchedSwitchIndex = 0; // GCC Warning
     int maxLen = kNoLen;
     for(int switchIndex = 0; switchIndex < _numSwitches; switchIndex++)
     {
-      int switchLen = wcslen(switchForms[switchIndex].IDString);
+      int switchLen = MyStringLen(switchForms[switchIndex].IDString);
       if (switchLen <= maxLen || pos + switchLen > len) 
         continue;
 
@@ -122,7 +133,7 @@ bool CParser::ParseString(const UString &s, const CSwitchForm *switchForms)
     NSwitchType::EEnum type = switchForm.Type;
     switch(type)
     {
-      case (NSwitchType::kPostMinus):
+      case NSwitchType::kPostMinus:
         {
           if (tailSize == 0)
             matchedSwitch.WithMinus = false;
@@ -134,7 +145,7 @@ bool CParser::ParseString(const UString &s, const CSwitchForm *switchForms)
           }
           break;
         }
-      case (NSwitchType::kPostChar):
+      case NSwitchType::kPostChar:
         {
           if (tailSize < switchForm.MinLen)
             throw "switch is not full";
@@ -155,7 +166,8 @@ bool CParser::ParseString(const UString &s, const CSwitchForm *switchForms)
           }
           break;
         }
-      case NSwitchType::kLimitedPostString: case NSwitchType::kUnLimitedPostString: 
+      case NSwitchType::kLimitedPostString: 
+      case NSwitchType::kUnLimitedPostString: 
         {
           int minLen = switchForm.MinLen;
           if (tailSize < minLen)
@@ -176,7 +188,10 @@ bool CParser::ParseString(const UString &s, const CSwitchForm *switchForms)
             stringSwitch += c;
           }
           matchedSwitch.PostStrings.Add(stringSwitch);
+          break;
         }
+      case NSwitchType::kSimple:
+          break;
     }
   }
   return true;
@@ -223,7 +238,7 @@ bool ParseSubCharsCommand(int numForms, const CCommandSubCharsSet *forms,
   {
     const CCommandSubCharsSet &set = forms[i];
     int currentIndex = -1;
-    int len = wcslen(set.Chars);
+    int len = MyStringLen(set.Chars);
     for(int j = 0; j < len; j++)
     {
       wchar_t c = set.Chars[j];
