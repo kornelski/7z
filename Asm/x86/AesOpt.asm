@@ -202,7 +202,7 @@ MY_PROC AesCtr_Code_Intel, 3
     rept ways
     paddq   xmm6, xmm7
     movdqa  @CatStr(xmm,%i), xmm6
-    i = i + 1
+    inc i
     endm
 
     mov     r3, r6
