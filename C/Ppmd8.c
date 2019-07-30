@@ -639,7 +639,7 @@ static CTX_PTR CreateSuccessors(CPpmd8 *p, BoolInt skip, CPpmd_State *s1, CTX_PT
     else
     {
       s = ONE_STATE(c);
-      s->Freq = (Byte)(s->Freq + (!SUFFIX(c)->NumStats & (s->Freq < 24)));
+      s->Freq = (Byte)(s->Freq + ((!SUFFIX(c)->NumStats) & (s->Freq < 24)));
     }
     successor = SUCCESSOR(s);
     if (successor != upBranch)
