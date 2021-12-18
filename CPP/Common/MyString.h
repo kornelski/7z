@@ -198,6 +198,7 @@ bool StringsAreEqualNoCase(const wchar_t *s1, const wchar_t *s2) throw();
 bool IsString1PrefixedByString2(const char *s1, const char *s2) throw();
 bool IsString1PrefixedByString2(const wchar_t *s1, const wchar_t *s2) throw();
 bool IsString1PrefixedByString2(const wchar_t *s1, const char *s2) throw();
+bool IsString1PrefixedByString2_NoCase_Ascii(const char *s1, const char *s2) throw();
 bool IsString1PrefixedByString2_NoCase_Ascii(const wchar_t *u, const char *a) throw();
 bool IsString1PrefixedByString2_NoCase(const wchar_t *s1, const wchar_t *s2) throw();
 
@@ -366,6 +367,7 @@ public:
   AString &operator+=(const AString &s);
 
   void Add_UInt32(UInt32 v);
+  void Add_UInt64(UInt64 v);
 
   void SetFrom(const char *s, unsigned len); // no check
   void SetFrom_CalcLen(const char *s, unsigned len);
@@ -632,6 +634,7 @@ public:
   UString &operator+=(const AString &s) { return operator+=(s.Ptr()); }
 
   void Add_UInt32(UInt32 v);
+  void Add_UInt64(UInt64 v);
 
   UString Mid(unsigned startIndex, unsigned count) const { return UString(count, _chars + startIndex); }
   UString Left(unsigned count) const { return UString(count, *this); }

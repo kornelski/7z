@@ -2,7 +2,7 @@
 # USE_ASM = 1
 # IS_X64 = 1
 # MY_ARCH =
-
+# USE_ASM=
 
 MY_ARCH_2 = $(MY_ARCH)
 
@@ -10,6 +10,7 @@ MY_ASM = jwasm
 MY_ASM = asmc
 
 PROGPATH = $(O)/$(PROG)
+PROGPATH_STATIC = $(O)/$(PROG)s
 
 
 ifneq ($(CC), xlc)
@@ -22,6 +23,8 @@ CFLAGS_BASE_LIST = -c
 CFLAGS_BASE = -O2 $(CFLAGS_BASE_LIST) $(CFLAGS_WARN_WALL) $(CFLAGS_WARN) \
  -DNDEBUG -D_REENTRANT -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE \
  -fPIC
+
+# -D_7ZIP_AFFINITY_DISABLE
 
 
 ifdef SystemDrive
@@ -86,7 +89,7 @@ endif
 
 
 PROGPATH = $(O)/$(PROG)$(SHARED_EXT)
-
+PROGPATH_STATIC = $(O)/$(PROG)s$(SHARED_EXT)
 	
 ifdef IS_MINGW
 
@@ -112,7 +115,7 @@ LIB2 = -lpthread -ldl
 
 
 
-DEL_OBJ_EXE = -$(RM) $(PROGPATH) $(OBJS)
+DEL_OBJ_EXE = -$(RM) $(PROGPATH) $(PROGPATH_STATIC) $(OBJS)
 
 endif
 
@@ -148,13 +151,23 @@ CXX_WARN_FLAGS =
 
 CXXFLAGS = $(MY_ARCH_2) $(LOCAL_FLAGS) $(CXXFLAGS_BASE2) $(CFLAGS_BASE) $(CXXFLAGS_EXTRA) $(CC_SHARED) -o $@ $(CXX_WARN_FLAGS)
 
-all: $(O) $(PROGPATH)
+STATIC_TARGET=
+ifdef COMPL_STATIC
+STATIC_TARGET=$(PROGPATH_STATIC)
+endif
+
+
+all: $(O) $(PROGPATH) $(STATIC_TARGET)
 
 $(O):
 	$(MY_MKDIR) $(O)
 
+LFLAGS_ALL = -s $(MY_ARCH_2) $(LDFLAGS) $(LD_arch) $(OBJS) $(MY_LIBS) $(LIB2)
 $(PROGPATH): $(OBJS)
-	$(CXX) -o $(PROGPATH) -s $(MY_ARCH_2) $(LDFLAGS) $(LD_arch) $(OBJS) $(MY_LIBS) $(LIB2)
+	$(CXX) -o $(PROGPATH) $(LFLAGS_ALL)
+
+$(PROGPATH_STATIC): $(OBJS)
+	$(CXX) -static -o $(PROGPATH_STATIC) $(LFLAGS_ALL)
 
 #	-s strips debug sections from executable in GCC
 
@@ -185,6 +198,8 @@ $O/IntToString.o: ../../../Common/IntToString.cpp
 $O/Lang.o: ../../../Common/Lang.cpp
 	$(CXX) $(CXXFLAGS) $<
 $O/ListFileUtils.o: ../../../Common/ListFileUtils.cpp
+	$(CXX) $(CXXFLAGS) $<
+$O/LzFindPrepare.o: ../../../Common/LzFindPrepare.cpp
 	$(CXX) $(CXXFLAGS) $<
 $O/MyMap.o: ../../../Common/MyMap.cpp
 	$(CXX) $(CXXFLAGS) $<
@@ -1095,6 +1110,7 @@ $O/XzCrc64.o: ../../../../C/XzCrc64.c
 ifdef USE_ASM
 ifdef IS_X64
 USE_X86_ASM=1
+USE_X64_ASM=1
 else
 ifdef IS_X86
 USE_X86_ASM=1
@@ -1126,6 +1142,13 @@ $O/AesOpt.o: ../../../../C/AesOpt.c
 	$(CC) $(CFLAGS) $<
 endif
 
+ifdef USE_X64_ASM
+$O/LzFindOpt.o: ../../../../Asm/x86/LzFindOpt.asm
+	$(MY_ASM) $(AFLAGS) $<
+else
+$O/LzFindOpt.o: ../../../../C/LzFindOpt.c
+	$(CC) $(CFLAGS) $<
+endif
 
 ifdef USE_LZMA_DEC_ASM
 

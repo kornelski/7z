@@ -763,6 +763,12 @@ STDMETHODIMP CHandler::SetProperties(const wchar_t * const *names, const PROPVAR
       _forceCodePage = true;
       _curCodePage = _specifiedCodePage = cp;
     }
+    else if (name.IsPrefixedBy_Ascii_NoCase("mt"))
+    {
+    }
+    else if (name.IsPrefixedBy_Ascii_NoCase("memuse"))
+    {
+    }
     else
       return E_INVALIDARG;
   }

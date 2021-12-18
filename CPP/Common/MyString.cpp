@@ -322,6 +322,17 @@ bool IsString1PrefixedByString2(const wchar_t *s1, const char *s2) throw()
   }
 }
 
+bool IsString1PrefixedByString2_NoCase_Ascii(const char *s1, const char *s2) throw()
+{
+  for (;;)
+  {
+    char c2 = *s2++; if (c2 == 0) return true;
+    char c1 = *s1++;
+    if (c1 != c2 && MyCharLower_Ascii(c1) != MyCharLower_Ascii(c2))
+      return false;
+  }
+}
+
 bool IsString1PrefixedByString2_NoCase_Ascii(const wchar_t *s1, const char *s2) throw()
 {
   for (;;)
@@ -648,6 +659,12 @@ void AString::Add_UInt32(UInt32 v)
 {
   Grow(10);
   _len = (unsigned)(ConvertUInt32ToString(v, _chars + _len) - _chars);
+}
+
+void UString::Add_UInt64(UInt64 v)
+{
+  Grow(20);
+  _len = (unsigned)(ConvertUInt64ToString(v, _chars + _len) - _chars);
 }
 
 void AString::SetFrom(const char *s, unsigned len) // no check
@@ -1291,6 +1308,12 @@ void UString::Add_UInt32(UInt32 v)
 {
   Grow(10);
   _len = (unsigned)(ConvertUInt32ToString(v, _chars + _len) - _chars);
+}
+
+void AString::Add_UInt64(UInt64 v)
+{
+  Grow(20);
+  _len = (unsigned)(ConvertUInt64ToString(v, _chars + _len) - _chars);
 }
 
 
