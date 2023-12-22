@@ -12,9 +12,11 @@
 #endif
 
 #include "../../../C/CpuArch.h"
+#include "../../../C/Sha256.h"
 
 #include "../../Common/ComTry.h"
 #include "../../Common/IntToString.h"
+#include "../../Common/MyBuffer2.h"
 #include "../../Common/MyLinux.h"
 #include "../../Common/UTFConvert.h"
 
@@ -31,6 +33,8 @@
 #include "../Compress/CopyCoder.h"
 
 #include "Common/ItemNameUtils.h"
+
+#include "HfsHandler.h"
 
 // if APFS_SHOW_ALT_STREAMS is defined, the handler will show attribute files.
 #define APFS_SHOW_ALT_STREAMS
@@ -85,7 +89,8 @@ struct CUuid
 
 typedef UInt64  oid_t;
 typedef UInt64  xid_t;
-typedef Int64   paddr_t;
+// typedef Int64   paddr_t;
+typedef UInt64   paddr_t_unsigned;
 
 #define G64o G64
 #define G64x G64
@@ -138,8 +143,10 @@ struct prange_t
 #define OBJECT_TYPE_GBITMAP_BLOCK       0x1b
 #define OBJECT_TYPE_ER_RECOVERY_BLOCK   0x1c
 #define OBJECT_TYPE_SNAP_META_EXT       0x1d
+*/
 #define OBJECT_TYPE_INTEGRITY_META      0x1e
 #define OBJECT_TYPE_FEXT_TREE           0x1f
+/*
 #define OBJECT_TYPE_RESERVED_20         0x20
 
 #define OBJECT_TYPE_INVALID       0x0
@@ -150,8 +157,9 @@ struct prange_t
 
 #define OBJ_VIRTUAL       0x0
 #define OBJ_EPHEMERAL     0x80000000
+*/
 #define OBJ_PHYSICAL      0x40000000
-
+/*
 #define OBJ_NOHEADER      0x20000000
 #define OBJ_ENCRYPTED     0x10000000
 #define OBJ_NONPERSISTENT 0x08000000
@@ -164,6 +172,8 @@ struct prange_t
 */
 
 // #define MAX_CKSUM_SIZE 8
+
+static const unsigned k_obj_phys_Size = 0x20;
 
 // obj_phys_t
 struct CPhys
@@ -181,10 +191,10 @@ struct CPhys
 void CPhys::Parse(const Byte *p)
 {
   // memcpy(cksum, p, MAX_CKSUM_SIZE);
-  G64o (8, oid);
-  G64x (0x10, xid);
-  G32 (0x18, type);
-  G32 (0x1C, subtype);
+  G64o (8, oid)
+  G64x (0x10, xid)
+  G32 (0x18, type)
+  G32 (0x1C, subtype)
 }
 
 #define NX_MAX_FILE_SYSTEMS   100
@@ -214,7 +224,9 @@ typedef enum
 #define APFS_INCOMPAT_NORMALIZATION_INSENSITIVE (1 << 3)
 /*
 #define APFS_INCOMPAT_INCOMPLETE_RESTORE        (1 << 4)
+*/
 #define APFS_INCOMPAT_SEALED_VOLUME             (1 << 5)
+/*
 #define APFS_INCOMPAT_RESERVED_40               (1 << 6)
 */
 
@@ -299,7 +311,7 @@ struct CSuperBlock2
   {
     for (unsigned i = 0; i < NX_MAX_FILE_SYSTEMS; i++)
     {
-      G64o (0xb8 + i * 8, fs_oid[i]);
+      G64o (0xb8 + i * 8, fs_oid[i])
     }
   }
 };
@@ -367,17 +379,18 @@ bool CSuperBlock::Parse(const Byte *p)
   if (!CheckFletcher64(p, kApfsHeaderSize))
     return false;
 
-  G32 (0x24, block_size);
+  G32 (0x24, block_size)
   {
-    unsigned logSize = GetLogSize(block_size);
+    const unsigned logSize = GetLogSize(block_size);
+    // don't change it. Some code requires (block_size <= 16)
     if (logSize < 12 || logSize > 16)
       return false;
     block_size_Log = logSize;
   }
 
-  G64 (0x28, block_count);
+  G64 (0x28, block_count)
 
-  static const UInt64 kArcSize_MAX = (UInt64)1 << 62;
+  const UInt64 kArcSize_MAX = (UInt64)1 << 62;
   if (block_count > (kArcSize_MAX >> block_size_Log))
     return false;
 
@@ -400,10 +413,10 @@ bool CSuperBlock::Parse(const Byte *p)
   G32 (0x94, xp_data_len);
   G64o (0x98, spaceman_oid);
   */
-  G64o (0xa0, omap_oid);
+  G64o (0xa0, omap_oid)
   // G64o (0xa8, reaper_oid);
   // G32 (0xb0, test_type);
-  G32 (0xb4, max_file_systems);
+  G32 (0xb4, max_file_systems)
   if (max_file_systems > NX_MAX_FILE_SYSTEMS)
     return false;
   /*
@@ -446,6 +459,87 @@ bool CSuperBlock::Parse(const Byte *p)
 }
 
 
+enum apfs_hash_type_t
+{
+  APFS_HASH_INVALID = 0,
+  APFS_HASH_SHA256 = 1,
+  APFS_HASH_SHA512_256 = 2,
+  APFS_HASH_SHA384 = 3,
+  APFS_HASH_SHA512 = 4,
+
+  APFS_HASH_MIN = APFS_HASH_SHA256,
+  APFS_HASH_MAX = APFS_HASH_SHA512,
+
+  APFS_HASH_DEFAULT = APFS_HASH_SHA256
+};
+
+static unsigned GetHashSize(unsigned hashType)
+{
+  if (hashType > APFS_HASH_MAX) return 0;
+  if (hashType < APFS_HASH_MIN) return 0;
+  if (hashType == APFS_HASH_SHA256) return 32;
+  return hashType * 16;
+}
+
+#define APFS_HASH_MAX_SIZE 64
+
+static const char * const g_hash_types[] =
+{
+    NULL
+  , "SHA256"
+  , "SHA512_256"
+  , "SHA384"
+  , "SHA512"
+};
+
+
+struct C_integrity_meta_phys
+{
+  // CPhys im_o;
+  // UInt32 im_version;
+  UInt32 im_flags;
+  // apfs_hash_type_t
+  UInt32 im_hash_type;
+  // UInt32 im_root_hash_offset;
+  // xid_t im_broken_xid;
+  // UInt64 im_reserved[9];
+
+  unsigned HashSize;
+  Byte Hash[APFS_HASH_MAX_SIZE];
+
+  bool Is_SHA256() const { return im_hash_type == APFS_HASH_SHA256; }
+
+  C_integrity_meta_phys()
+  {
+    memset(this, 0, sizeof(*this));
+  }
+  bool Parse(const Byte *p, size_t size, oid_t oid);
+};
+
+bool C_integrity_meta_phys::Parse(const Byte *p, size_t size, oid_t oid)
+{
+  CPhys o;
+  if (!CheckFletcher64(p, size))
+    return false;
+  o.Parse(p);
+  if (o.GetType() != OBJECT_TYPE_INTEGRITY_META)
+    return false;
+  if (o.oid != oid)
+    return false;
+  // G32 (0x20, im_version);
+  G32 (0x24, im_flags)
+  G32 (0x28, im_hash_type)
+  UInt32 im_root_hash_offset;
+  G32 (0x2C, im_root_hash_offset)
+  // G64x (0x30, im_broken_xid);
+  const unsigned hashSize = GetHashSize(im_hash_type);
+  HashSize = hashSize;
+  if (im_root_hash_offset >= size || size - im_root_hash_offset < hashSize)
+    return false;
+  memcpy(Hash, p + im_root_hash_offset, hashSize);
+  return true;
+}
+
 
 struct C_omap_phys
 {
@@ -483,7 +577,7 @@ bool C_omap_phys::Parse(const Byte *p, size_t size, oid_t oid)
   G32 (0x28, tree_type);
   G32 (0x2C, snapshot_tree_type);
   */
-  G64o (0x30, tree_oid);
+  G64o (0x30, tree_oid)
   /*
   G64o (0x38, snapshot_tree_oid);
   G64x (0x40, most_recent_snap);
@@ -507,8 +601,8 @@ struct nloc
   
   void Parse(const Byte *p)
   {
-    G16 (0, off);
-    G16 (2, len);
+    G16 (0, off)
+    G16 (2, len)
   }
   UInt32 GetEnd() const { return (UInt32)off + len; }
   bool CheckOverLimit(UInt32 limit)
@@ -540,8 +634,8 @@ struct kvoff
 
   void Parse(const Byte *p)
   {
-    G16 (0, k);
-    G16 (2, v);
+    G16 (0, k)
+    G16 (2, v)
   }
 };
 
@@ -549,9 +643,9 @@ struct kvoff
 #define BTNODE_ROOT             (1 << 0)
 #define BTNODE_LEAF             (1 << 1)
 #define BTNODE_FIXED_KV_SIZE    (1 << 2)
-/*
 #define BTNODE_HASHED           (1 << 3)
 #define BTNODE_NOHEADER         (1 << 4)
+/*
 #define BTNODE_CHECK_KOFF_INVAL (1 << 15)
 */
 
@@ -561,7 +655,7 @@ static const unsigned k_Toc_offset = 0x38;
 struct CBTreeNodePhys
 {
   // btn_ prefix
-  CPhys o;
+  CPhys ophys;
   UInt16 flags;
   UInt16 level;       // the number of child levels below this node. 0 -  for a leaf node, 1 for the immediate parent of a leaf node
   UInt32 nkeys;       // The number of keys stored in this node.
@@ -573,21 +667,35 @@ struct CBTreeNodePhys
   */
 
   bool Is_FIXED_KV_SIZE() const { return (flags & BTNODE_FIXED_KV_SIZE) != 0; }
+  bool Is_NOHEADER() const { return (flags & BTNODE_NOHEADER) != 0; }
+  bool Is_HASHED() const { return (flags & BTNODE_HASHED) != 0; }
 
-  bool Parse(const Byte *p, size_t size)
+  bool Parse(const Byte *p, size_t size, bool noHeader = false)
   {
-    if (!CheckFletcher64(p, size))
-      return false;
-    o.Parse(p);
-    G16 (0x20, flags);
-    G16 (0x22, level);
-    G32 (0x24, nkeys);
+    G16 (0x20, flags)
+    G16 (0x22, level)
+    G32 (0x24, nkeys)
     table_space.Parse(p + 0x28);
     /*
     free_space.Parse(p + 0x2C);
     key_free_list.Parse(p + 0x30);
     val_free_list.Parse(p + 0x34);
     */
+    memset(&ophys, 0, sizeof(ophys));
+    if (noHeader)
+    {
+      for (unsigned i = 0; i < k_obj_phys_Size; i++)
+        if (p[i] != 0)
+          return false;
+    }
+    else
+    {
+      if (!CheckFletcher64(p, size))
+        return false;
+      ophys.Parse(p);
+    }
+    if (Is_NOHEADER() != noHeader)
+      return false;
     return true;
   }
 };
@@ -604,6 +712,7 @@ struct CBTreeNodePhys
 #define BTREE_KV_NONALIGNED     (1 << 6)
 #define BTREE_HASHED            (1 << 7)
 */
+#define BTREE_NOHEADER          (1 << 8)
 
 /*
   BTREE_EPHEMERAL: The nodes in the B-tree use ephemeral object identifiers to link to child nodes
@@ -622,10 +731,10 @@ struct btree_info_fixed
 
   void Parse(const Byte *p)
   {
-    G32 (0, flags);
-    G32 (4, node_size);
-    G32 (8, key_size);
-    G32 (12, val_size);
+    G32 (0, flags)
+    G32 (4, node_size)
+    G32 (8, key_size)
+    G32 (12, val_size)
   }
 };
 
@@ -641,14 +750,15 @@ struct btree_info
 
   bool Is_EPHEMERAL() const { return (fixed.flags & BTREE_EPHEMERAL) != 0; }
   bool Is_PHYSICAL()  const { return (fixed.flags & BTREE_PHYSICAL) != 0; }
+  bool Is_NOHEADER()  const { return (fixed.flags & BTREE_NOHEADER) != 0; }
 
   void Parse(const Byte *p)
   {
     fixed.Parse(p);
-    G32 (0x10, longest_key);
-    G32 (0x14, longest_val);
-    G64 (0x18, key_count);
-    G64 (0x20, node_count);
+    G32 (0x10, longest_key)
+    G32 (0x14, longest_val)
+    G64 (0x18, key_count)
+    G64 (0x20, node_count)
   }
 };
 
@@ -683,7 +793,7 @@ struct wrapped_meta_crypto_state
 
 
 #define APFS_MODIFIED_NAMELEN 32
-#define sizeof__apfs_modified_by_t (APFS_MODIFIED_NAMELEN + 16);
+#define sizeof_apfs_modified_by_t (APFS_MODIFIED_NAMELEN + 16)
 
 struct apfs_modified_by_t
 {
@@ -695,8 +805,8 @@ struct apfs_modified_by_t
   {
     memcpy(id, p, APFS_MODIFIED_NAMELEN);
     p += APFS_MODIFIED_NAMELEN;
-    G64 (0, timestamp);
-    G64x (8, last_xid);
+    G64 (0, timestamp)
+    G64x (8, last_xid)
   }
 };
 
@@ -709,7 +819,7 @@ struct CApfs
   // apfs_
   CPhys o;
   // UInt32 magic;
-  UInt32 fs_index; // e index of the object identifier for this volume's file system in the container's array of file systems.
+  UInt32 fs_index; // index of the object identifier for this volume's file system in the container's array of file systems.
   // UInt64 features;
   // UInt64 readonly_compatible_features;
   UInt64 incompatible_features;
@@ -757,9 +867,11 @@ struct CApfs
   UInt64 cloneinfo_xid;
   oid_t snap_meta_ext_oid;
   CUuid volume_group_id;
-  oid_t integrity_meta_oid;
-  oid_t fext_tree_oid;
-  UInt32 fext_tree_type;
+  */
+  oid_t integrity_meta_oid; // virtual object identifier of the integrity metadata object
+  oid_t fext_tree_oid;      // virtual object identifier of the file extent tree.
+  UInt32 fext_tree_type;    // The type of the file extent tree.
+  /*
   UInt32 reserved_type;
   oid_t reserved_oid;
   */
@@ -791,21 +903,21 @@ bool CApfs::Parse(const Byte *p, size_t size)
     return false;
   // if (o.GetType() != OBJECT_TYPE_NX_SUPERBLOCK) return false;
 
-  G32 (0x24, fs_index);
+  G32 (0x24, fs_index)
   // G64 (0x28, features);
   // G64 (0x30, readonly_compatible_features);
-  G64 (0x38, incompatible_features);
-  G64 (0x40, unmount_time);
+  G64 (0x38, incompatible_features)
+  G64 (0x40, unmount_time)
   // G64 (0x48, fs_reserve_block_count);
   // G64 (0x50, fs_quota_block_count);
-  G64 (0x58, fs_alloc_count);
+  G64 (0x58, fs_alloc_count)
   // meta_crypto.Parse(p + 0x60);
   // G32 (0x74, root_tree_type);
   // G32 (0x78, extentref_tree_type);
   // G32 (0x7C, snap_meta_tree_type);
 
-  G64o (0x80, omap_oid);
-  G64o (0x88, root_tree_oid);
+  G64o (0x80, omap_oid)
+  G64o (0x88, root_tree_oid)
   /*
   G64o (0x90, extentref_tree_oid);
   G64o (0x98, snap_meta_tree_oid);
@@ -813,23 +925,23 @@ bool CApfs::Parse(const Byte *p, size_t size)
   G64o (0xa8, revert_to_sblock_oid);
   G64 (0xb0, next_obj_id);
   */
-  G64 (0xb8, num_files);
-  G64 (0xc0, num_directories);
-  G64 (0xc8, num_symlinks);
-  G64 (0xd0, num_other_fsobjects);
-  G64 (0xd8, num_snapshots);
-  G64 (0xe0, total_blocks_alloced);
-  G64 (0xe8, total_blocks_freed);
+  G64 (0xb8, num_files)
+  G64 (0xc0, num_directories)
+  G64 (0xc8, num_symlinks)
+  G64 (0xd0, num_other_fsobjects)
+  G64 (0xd8, num_snapshots)
+  G64 (0xe0, total_blocks_alloced)
+  G64 (0xe8, total_blocks_freed)
   vol_uuid.SetFrom(p + 0xf0);
-  G64 (0x100, last_mod_time);
-  G64 (0x108, fs_flags);
+  G64 (0x100, last_mod_time)
+  G64 (0x108, fs_flags)
   p += 0x110;
   formatted_by.Parse(p);
-  p += sizeof__apfs_modified_by_t;
+  p += sizeof_apfs_modified_by_t;
   for (unsigned i = 0; i < APFS_MAX_HIST; i++)
   {
     modified_by[i].Parse(p);
-    p += sizeof__apfs_modified_by_t;
+    p += sizeof_apfs_modified_by_t;
   }
   memcpy(volname, p, APFS_VOLNAME_LEN);
   p += APFS_VOLNAME_LEN;
@@ -843,9 +955,11 @@ bool CApfs::Parse(const Byte *p, size_t size)
   G64 (0x20, cloneinfo_xid);
   G64o (0x28, snap_meta_ext_oid);
   volume_group_id.SetFrom(p + 0x30);
-  G64o (0x40, integrity_meta_oid);
-  G64o (0x48, fext_tree_oid);
-  G32 (0x50, fext_tree_type);
+  */
+  G64o (0x40, integrity_meta_oid)
+  G64o (0x48, fext_tree_oid)
+  G32 (0x50, fext_tree_type)
+  /*
   G32 (0x54, reserved_type);
   G64o (0x58, reserved_oid);
   */
@@ -886,7 +1000,7 @@ struct j_key_t
 {
   UInt64 obj_id_and_type;
 
-  void Parse(const Byte *p) { G64(0, obj_id_and_type); }
+  void Parse(const Byte *p) { G64(0, obj_id_and_type) }
   unsigned GetType() const { return (unsigned)(obj_id_and_type >> OBJ_TYPE_SHIFT); }
   UInt64 GetID() const { return obj_id_and_type & OBJ_ID_MASK; }
 };
@@ -916,9 +1030,9 @@ struct j_drec_val
   // uint8_t xfields[];
   void Parse(const Byte *p)
   {
-    G64 (0, file_id);
-    G64 (8, date_added);
-    G16 (0x10, flags);
+    G64 (0, file_id)
+    G64 (8, date_added)
+    G16 (0x10, flags)
   }
 };
 
@@ -934,11 +1048,12 @@ struct CItem
   unsigned RefIndex;
   // unsigned  iNode_Index;
   
-  CItem():
-      ParentItemIndex(VI_MINUS1),
-      RefIndex(VI_MINUS1)
-      // iNode_Index(VI_MINUS1)
-      {}
+  void Clear()
+  {
+    Name.Empty();
+    ParentItemIndex = VI_MINUS1;
+    RefIndex = VI_MINUS1;
+  }
 };
 
 
@@ -956,9 +1071,9 @@ struct CItem
 #define UNIFIED_ID_SPACE_MARK 0x0800000000000000
 */
 
+//typedef enum
+// {
 /*
-typedef enum
-{
 INODE_IS_APFS_PRIVATE         = 0x00000001,
 INODE_MAINTAIN_DIR_STATS      = 0x00000002,
 INODE_DIR_STATS_ORIGIN        = 0x00000004,
@@ -973,11 +1088,15 @@ INODE_WAS_EVER_CLONED         = 0x00000400,
 INODE_ACTIVE_FILE_TRIMMED     = 0x00000800,
 INODE_PINNED_TO_MAIN          = 0x00001000,
 INODE_PINNED_TO_TIER2         = 0x00002000,
-INODE_HAS_RSRC_FORK           = 0x00004000,
+*/
+// INODE_HAS_RSRC_FORK           = 0x00004000,
+/*
 INODE_NO_RSRC_FORK            = 0x00008000,
 INODE_ALLOCATION_SPILLEDOVER  = 0x00010000,
 INODE_FAST_PROMOTE            = 0x00020000,
-INODE_HAS_UNCOMPRESSED_SIZE   = 0x00040000,
+*/
+#define INODE_HAS_UNCOMPRESSED_SIZE  0x00040000
+/*
 INODE_IS_PURGEABLE            = 0x00080000,
 INODE_WANTS_TO_BE_PURGEABLE   = 0x00100000,
 INODE_IS_SYNC_ROOT            = 0x00200000,
@@ -993,10 +1112,12 @@ INODE_CLONED_INTERNAL_FLAGS = \
     | INODE_NO_RSRC_FORK \
     | INODE_HAS_FINDER_INFO \
     | INODE_SNAPSHOT_COW_EXEMPTION),
-}
-j_inode_flags;
+*/
+// }
+// j_inode_flags;
 
 
+/*
 #define APFS_VALID_INTERNAL_INODE_FLAGS \
 ( INODE_IS_APFS_PRIVATE \
 | INODE_MAINTAIN_DIR_STATS \
@@ -1054,24 +1175,24 @@ static const char * const g_INODE_Flags[] =
 
 // bsd stat.h
 /*
-#define MY__UF_SETTABLE   0x0000ffff  // mask of owner changeable flags
-#define MY__UF_NODUMP     0x00000001  // do not dump file
-#define MY__UF_IMMUTABLE  0x00000002  // file may not be changed
-#define MY__UF_APPEND     0x00000004  // writes to file may only append
-#define MY__UF_OPAQUE     0x00000008  // directory is opaque wrt. union
-#define MY__UF_NOUNLINK   0x00000010  // file entry may not be removed or renamed Not implement in MacOS
-#define MY__UF_COMPRESSED 0x00000020  // file entry is compressed
-#define MY__UF_TRACKED    0x00000040  // notify about file entry changes
-#define MY__UF_DATAVAULT  0x00000080  // entitlement required for reading and writing
-#define MY__UF_HIDDEN     0x00008000  // file entry is hidden
+#define MY_UF_SETTABLE   0x0000ffff  // mask of owner changeable flags
+#define MY_UF_NODUMP     0x00000001  // do not dump file
+#define MY_UF_IMMUTABLE  0x00000002  // file may not be changed
+#define MY_UF_APPEND     0x00000004  // writes to file may only append
+#define MY_UF_OPAQUE     0x00000008  // directory is opaque wrt. union
+#define MY_UF_NOUNLINK   0x00000010  // file entry may not be removed or renamed Not implement in MacOS
+#define MY_UF_COMPRESSED 0x00000020  // file entry is compressed
+#define MY_UF_TRACKED    0x00000040  // notify about file entry changes
+#define MY_UF_DATAVAULT  0x00000080  // entitlement required for reading and writing
+#define MY_UF_HIDDEN     0x00008000  // file entry is hidden
 
-#define MY__SF_SETTABLE   0xffff0000  // mask of superuser changeable flags
-#define MY__SF_ARCHIVED   0x00010000  // file is archived
-#define MY__SF_IMMUTABLE  0x00020000  // file may not be changed
-#define MY__SF_APPEND     0x00040000  // writes to file may only append
-#define MY__SF_RESTRICTED 0x00080000  // entitlement required for writing
-#define MY__SF_NOUNLINK   0x00100000  // file entry may not be removed, renamed or used as mount point
-#define MY__SF_SNAPSHOT   0x00200000  // snapshot inode
+#define MY_SF_SETTABLE   0xffff0000  // mask of superuser changeable flags
+#define MY_SF_ARCHIVED   0x00010000  // file is archived
+#define MY_SF_IMMUTABLE  0x00020000  // file may not be changed
+#define MY_SF_APPEND     0x00040000  // writes to file may only append
+#define MY_SF_RESTRICTED 0x00080000  // entitlement required for writing
+#define MY_SF_NOUNLINK   0x00100000  // file entry may not be removed, renamed or used as mount point
+#define MY_SF_SNAPSHOT   0x00200000  // snapshot inode
 Not implement in MacOS
 */
 
@@ -1133,11 +1254,11 @@ struct j_dstream
 
   void Parse(const Byte *p)
   {
-    G64 (0, size);
-    G64 (0x8, alloced_size);
-    G64 (0x10, default_crypto_id);
-    G64 (0x18, total_bytes_written);
-    G64 (0x20, total_bytes_read);
+    G64 (0, size)
+    G64 (0x8, alloced_size)
+    G64 (0x10, default_crypto_id)
+    G64 (0x18, total_bytes_written)
+    G64 (0x20, total_bytes_read)
   }
 };
 
@@ -1158,8 +1279,8 @@ struct j_file_extent_val
   
   void Parse(const Byte *p)
   {
-    G64 (0, len_and_flags);
-    G64 (0x8, phys_block_num);
+    G64 (0, len_and_flags)
+    G64 (0x8, phys_block_num)
     // G64 (0x10, crypto_id);
   }
 };
@@ -1171,12 +1292,14 @@ struct CExtent
   UInt64 len_and_flags;   // The length must be a multiple of the block size defined by the nx_block_size field of nx_superblock_t.
                           // There are currently no flags defined
   UInt64 phys_block_num;  // The physical block address that the extent starts at
+
+  UInt64 GetEndOffset() const { return logical_offset + EXTENT_GET_LEN(len_and_flags); }
 };
 
 
-typedef UInt32  MY__uid_t;
-typedef UInt32  MY__gid_t;
-typedef UInt16  MY__mode_t;
+typedef UInt32  MY_uid_t;
+typedef UInt32  MY_gid_t;
+typedef UInt16  MY_mode_t;
 
 
 typedef enum
@@ -1192,22 +1315,34 @@ struct CAttr
 {
   AString Name;
   UInt32 flags;
+  bool dstream_defined;
+  bool NeedShow;
   CByteBuffer Data;
 
   j_dstream dstream;
-  bool dstream_defined;
   UInt64 Id;
 
   bool Is_dstream_OK_for_SymLink() const
   {
     return dstream_defined && dstream.size <= (1 << 12) && dstream.size != 0;
   }
-  
-  CAttr():
-      dstream_defined(false)
-      {}
 
-  bool Is_STREAM() const { return (flags & XATTR_DATA_STREAM) != 0; }
+  UInt64 GetSize() const
+  {
+    if (dstream_defined) // dstream has more priority
+      return dstream.size;
+    return Data.Size();
+  }
+  
+  void Clear()
+  {
+    dstream_defined = false;
+    NeedShow = true;
+    Data.Free();
+    Name.Empty();
+  }
+
+  bool Is_STREAM()   const { return (flags & XATTR_DATA_STREAM) != 0; }
   bool Is_EMBEDDED() const { return (flags & XATTR_DATA_EMBEDDED) != 0; }
 };
 
@@ -1241,20 +1376,26 @@ struct CNode
   // cp_key_class_t default_protection_class;
   UInt32 write_generation_counter;
   UInt32 bsd_flags;
-  MY__uid_t owner;
-  MY__gid_t group;
-  MY__mode_t mode;
+  MY_uid_t owner;
+  MY_gid_t group;
+  MY_mode_t mode;
   UInt16 pad1;
-  // UInt64 uncompressed_size;
+  UInt64 uncompressed_size;
 
   j_dstream dstream;
   AString PrimaryName;
+  
   bool dstream_defined;
   bool refcnt_defined;
+
   UInt32 refcnt; // j_dstream_id_val_t
   CRecordVector<CExtent> Extents;
   CObjectVector<CAttr> Attrs;
   unsigned SymLinkIndex; // index in Attrs
+  unsigned DecmpfsIndex; // index in Attrs
+  unsigned ResourceIndex; // index in Attrs
+  
+  NHfs::CCompressHeader CompressHeader;
   
   CNode():
       ItemIndex(VI_MINUS1),
@@ -1262,11 +1403,16 @@ struct CNode
       // NumItems(0),
       dstream_defined(false),
       refcnt_defined(false),
-      SymLinkIndex(VI_MINUS1)
+      SymLinkIndex(VI_MINUS1),
+      DecmpfsIndex(VI_MINUS1),
+      ResourceIndex(VI_MINUS1)
       {}
 
   bool IsDir() const { return MY_LIN_S_ISDIR(mode); }
   bool IsSymLink() const { return MY_LIN_S_ISLNK(mode); }
+
+  bool Has_UNCOMPRESSED_SIZE() const { return (internal_flags & INODE_HAS_UNCOMPRESSED_SIZE) != 0; }
+
   unsigned Get_Type_From_mode() const { return mode >> 12; }
 
   bool GetSize(unsigned attrIndex, UInt64 &size) const
@@ -1276,6 +1422,12 @@ struct CNode
       if (dstream_defined)
       {
         size = dstream.size;
+        return true;
+      }
+      size = 0;
+      if (Has_UNCOMPRESSED_SIZE())
+      {
+        size = uncompressed_size;
         return true;
       }
       if (!IsSymLink())
@@ -1301,9 +1453,23 @@ struct CNode
         size = dstream.alloced_size;
         return true;
       }
-      if (!IsSymLink())
-        return false;
-      attrIndex = SymLinkIndex;
+      size = 0;
+      
+      if (IsSymLink())
+        attrIndex = SymLinkIndex;
+      else
+      {
+        if (!CompressHeader.IsCorrect ||
+            !CompressHeader.IsSupported)
+          return false;
+        const CAttr &attr = Attrs[DecmpfsIndex];
+        if (!CompressHeader.IsMethod_Resource())
+        {
+          size = attr.Data.Size() - CompressHeader.DataPos;
+          return true;
+        }
+        attrIndex = ResourceIndex;
+      }
       if (IsViNotDef(attrIndex))
         return false;
     }
@@ -1324,32 +1490,32 @@ struct CSmallNode
 {
   CRecordVector<CExtent> Extents;
   // UInt32 NumLinks;
-  // CSmallNode(): NumLinks(0) {};
+  // CSmallNode(): NumLinks(0) {}
 };
 
 static const unsigned k_SizeOf_j_inode_val = 0x5c;
 
 void CNode::Parse(const Byte *p)
 {
-  G64 (0, parent_id);
-  G64 (0x8, private_id);
-  G64 (0x10, create_time);
-  G64 (0x18, mod_time);
-  G64 (0x20, change_time);
-  G64 (0x28, access_time);
-  G64 (0x30, internal_flags);
+  G64 (0, parent_id)
+  G64 (0x8, private_id)
+  G64 (0x10, create_time)
+  G64 (0x18, mod_time)
+  G64 (0x20, change_time)
+  G64 (0x28, access_time)
+  G64 (0x30, internal_flags)
   {
-    G32(0x38, nchildren);
-    //  G32(0x38, nlink);
+    G32 (0x38, nchildren)
+    //  G32 (0x38, nlink);
   }
-  // G32(0x3c, default_protection_class);
-  G32(0x40, write_generation_counter);
-  G32(0x44, bsd_flags);
-  G32(0x48, owner);
-  G32(0x4c, group);
-  G16(0x50, mode);
-  // G16(0x52, pad1);
-  // G64 (0x54, uncompressed_size);
+  // G32 (0x3c, default_protection_class);
+  G32 (0x40, write_generation_counter)
+  G32 (0x44, bsd_flags)
+  G32 (0x48, owner)
+  G32 (0x4c, group)
+  G16 (0x50, mode)
+  // G16 (0x52, pad1);
+  G64 (0x54, uncompressed_size)
 }
 
 
@@ -1362,9 +1528,10 @@ struct CRef
  #ifdef APFS_SHOW_ALT_STREAMS
   unsigned AttrIndex;
   bool IsAltStream() const { return IsViDef(AttrIndex); }
-  unsigned GetAttrIndex() const { return AttrIndex; };
+  unsigned GetAttrIndex() const { return AttrIndex; }
  #else
-  unsigned GetAttrIndex() const { return VI_MINUS1; };
+  // bool IsAltStream() const { return false; }
+  unsigned GetAttrIndex() const { return VI_MINUS1; }
  #endif
 };
 
@@ -1374,6 +1541,128 @@ struct CRef2
   unsigned VolIndex;
   unsigned RefIndex;
 };
+
+
+struct CHashChunk
+{
+  UInt64 lba;
+  UInt32 hashed_len; // the value is UInt16
+  Byte hash[APFS_HASH_MAX_SIZE];
+};
+
+typedef CRecordVector<CHashChunk> CStreamHashes;
+
+
+Z7_CLASS_IMP_NOQIB_1(
+  COutStreamWithHash
+  , ISequentialOutStream
+)
+  bool _hashError;
+  CAlignedBuffer1 _sha;
+  CMyComPtr<ISequentialOutStream> _stream;
+  const CStreamHashes *_hashes;
+  unsigned _blockSizeLog;
+  unsigned _chunkIndex;
+  UInt32 _offsetInChunk;
+  // UInt64 _size;
+
+  CSha256 *Sha() { return (CSha256 *)(void *)(Byte *)_sha; }
+public:
+  COutStreamWithHash(): _sha(sizeof(CSha256)) {}
+
+  void SetStream(ISequentialOutStream *stream) { _stream = stream; }
+  // void ReleaseStream() { _stream.Release(); }
+  void Init(const CStreamHashes *hashes, unsigned blockSizeLog)
+  {
+    _hashes = hashes;
+    _blockSizeLog = blockSizeLog;
+    _chunkIndex = 0;
+    _offsetInChunk = 0;
+    _hashError = false;
+    // _size = 0;
+  }
+  // UInt64 GetSize() const { return _size; }
+  bool FinalCheck();
+};
+
+
+static bool Sha256_Final_and_CheckDigest(CSha256 *sha256, const Byte *digest)
+{
+  MY_ALIGN (16)
+  UInt32 temp[SHA256_NUM_DIGEST_WORDS];
+  Sha256_Final(sha256, (Byte *)temp);
+  return memcmp(temp, digest, SHA256_DIGEST_SIZE) == 0;
+}
+
+
+Z7_COM7F_IMF(COutStreamWithHash::Write(const void *data, UInt32 size, UInt32 *processedSize))
+{
+  HRESULT result = S_OK;
+  if (_stream)
+    result = _stream->Write(data, size, &size);
+  if (processedSize)
+    *processedSize = size;
+  while (size != 0)
+  {
+    if (_hashError)
+      break;
+    if (_chunkIndex >= _hashes->Size())
+    {
+      _hashError = true;
+      break;
+    }
+    if (_offsetInChunk == 0)
+      Sha256_Init(Sha());
+    const CHashChunk &chunk = (*_hashes)[_chunkIndex];
+    /* (_blockSizeLog <= 16) && chunk.hashed_len is 16-bit.
+       so we can use 32-bit chunkSize here */
+    const UInt32 chunkSize = ((UInt32)chunk.hashed_len << _blockSizeLog);
+    const UInt32 rem = chunkSize - _offsetInChunk;
+    UInt32 cur = size;
+    if (cur > rem)
+      cur = (UInt32)rem;
+    Sha256_Update(Sha(), (const Byte *)data, cur);
+    data = (const void *)((const Byte *)data + cur);
+    size -= cur;
+    // _size += cur;
+    _offsetInChunk += cur;
+    if (chunkSize == _offsetInChunk)
+    {
+      if (!Sha256_Final_and_CheckDigest(Sha(), chunk.hash))
+        _hashError = true;
+      _offsetInChunk = 0;
+      _chunkIndex++;
+    }
+  }
+  return result;
+}
+
+
+bool COutStreamWithHash::FinalCheck()
+{
+  if (_hashError)
+    return false;
+
+  if (_offsetInChunk != 0)
+  {
+    const CHashChunk &chunk = (*_hashes)[_chunkIndex];
+    {
+      const UInt32 chunkSize = ((UInt32)chunk.hashed_len << _blockSizeLog);
+      const UInt32 rem = chunkSize - _offsetInChunk;
+      Byte b = 0;
+      for (UInt32 i = 0; i < rem; i++)
+        Sha256_Update(Sha(), &b, 1);
+    }
+    if (!Sha256_Final_and_CheckDigest(Sha(), chunk.hash))
+      _hashError = true;
+    _offsetInChunk = 0;
+    _chunkIndex++;
+  }
+  if (_chunkIndex != _hashes->Size())
+    _hashError = true;
+  return !_hashError;
+}
+
 
 
 struct CVol
@@ -1386,13 +1675,22 @@ struct CVol
   CObjectVector<CSmallNode> SmallNodes;
   CRecordVector<UInt64> SmallNodeIDs;
 
+  CObjectVector<CSmallNode> FEXT_Nodes;
+  CRecordVector<UInt64> FEXT_NodeIDs;
+
+  CObjectVector<CStreamHashes> Hash_Vectors;
+  CRecordVector<UInt64> Hash_IDs;
+
   unsigned StartRef2Index;  // ref2_Index for Refs[0] item
   unsigned RootRef2Index;   // ref2_Index of virtual root folder (Volume1)
   CApfs apfs;
+  C_integrity_meta_phys integrity;
+
   bool NodeNotFound;
   bool ThereAreUnlinkedNodes;
   bool WrongInodeLink;
   bool UnsupportedFeature;
+  bool UnsupportedMethod;
 
   unsigned NumItems_In_PrivateDir;
   unsigned NumAltStreams;
@@ -1415,6 +1713,7 @@ struct CVol
       ThereAreUnlinkedNodes(false),
       WrongInodeLink(false),
       UnsupportedFeature(false),
+      UnsupportedMethod(false),
       NumItems_In_PrivateDir(0),
       NumAltStreams(0)
       {}
@@ -1426,7 +1725,7 @@ static void ApfsTimeToFileTime(UInt64 apfsTime, FILETIME &ft, UInt32 &ns100)
   const UInt64 s = apfsTime / 1000000000;
   const UInt32 ns = (UInt32)(apfsTime % 1000000000);
   ns100 = (ns % 100);
-  const UInt64 v = NWindows::NTime::UnixTime64_To_FileTime64(s) + ns / 100;
+  const UInt64 v = NWindows::NTime::UnixTime64_To_FileTime64((Int64)s) + ns / 100;
   ft.dwLowDateTime = (DWORD)v;
   ft.dwHighDateTime = (DWORD)(v >> 32);
 }
@@ -1508,9 +1807,32 @@ void CVol::AddComment(UString &s) const
 
   AddComment_Name(s, "incompatible_features");
   s += FlagsToString(g_APFS_INCOMPAT_Flags,
-      ARRAY_SIZE(g_APFS_INCOMPAT_Flags),
+      Z7_ARRAY_SIZE(g_APFS_INCOMPAT_Flags),
       (UInt32)apfs.incompatible_features);
   s.Add_LF();
+
+
+  if (apfs.integrity_meta_oid != 0)
+  {
+    /*
+    AddComment_Name(s, "im_version");
+    s.Add_UInt32(integrity.im_version);
+    s.Add_LF();
+    */
+    AddComment_Name(s, "im_flags");
+    s.Add_UInt32(integrity.im_flags);
+    s.Add_LF();
+    AddComment_Name(s, "im_hash_type");
+    const char *p = NULL;
+    if (integrity.im_hash_type < Z7_ARRAY_SIZE(g_hash_types))
+      p = g_hash_types[integrity.im_hash_type];
+    if (p)
+      s += p;
+    else
+      s.Add_UInt32(integrity.im_hash_type);
+    s.Add_LF();
+  }
+
 
   // AddComment_UInt64(s, "reserve_block_count", apfs.fs_reserve_block_count, false);
   // AddComment_UInt64(s, "quota_block_count", apfs.fs_quota_block_count);
@@ -1530,7 +1852,7 @@ void CVol::AddComment(UString &s) const
   AddComment_Time(s, "unmounted", apfs.unmount_time);
   AddComment_Time(s, "last_modified", apfs.last_mod_time);
   AddComment_modified_by_t(s, "formatted_by", apfs.formatted_by);
-  for (unsigned i = 0; i < ARRAY_SIZE(apfs.modified_by); i++)
+  for (unsigned i = 0; i < Z7_ARRAY_SIZE(apfs.modified_by); i++)
   {
     const apfs_modified_by_t &v = apfs.modified_by[i];
     if (v.last_xid == 0 && v.timestamp == 0 && v.id[0] == 0)
@@ -1558,8 +1880,8 @@ struct omap_key
   xid_t xid; // The transaction identifier
   void Parse(const Byte *p)
   {
-    G64o (0, oid);
-    G64x (8, xid);
+    G64o (0, oid)
+    G64x (8, xid)
   }
 };
 
@@ -1567,7 +1889,9 @@ struct omap_key
 #define OMAP_VAL_DELETED            (1 << 0)
 #define OMAP_VAL_SAVED              (1 << 1)
 #define OMAP_VAL_ENCRYPTED          (1 << 2)
+*/
 #define OMAP_VAL_NOHEADER           (1 << 3)
+/*
 #define OMAP_VAL_CRYPTO_GENERATION  (1 << 4)
 */
 
@@ -1575,13 +1899,16 @@ struct omap_val
 {
   UInt32 flags;
   UInt32 size;
-  paddr_t paddr;
+  // paddr_t paddr;
+  paddr_t_unsigned paddr;
+
+  bool IsFlag_NoHeader() const { return (flags & OMAP_VAL_NOHEADER) != 0; }
   
   void Parse(const Byte *p)
   {
-    G32 (0, flags);
-    G32 (4, size);
-    G64 (8, paddr);
+    G32 (0, flags)
+    G32 (4, size)
+    G64 (8, paddr)
   }
 };
 
@@ -1657,6 +1984,7 @@ struct CDatabase
   bool HeadersError;
   bool ThereAreAltStreams;
   bool UnsupportedFeature;
+  bool UnsupportedMethod;
   
   CSuperBlock sb;
 
@@ -1667,17 +1995,21 @@ struct CDatabase
   UInt64 ProgressVal_NumFilesTotal;
   CObjectVector<CByteBuffer> Buffers;
 
+  UInt32 MethodsMask;
   UInt64 GetSize(const UInt32 index) const;
 
   void Clear()
   {
     HeadersError = false;
-    UnsupportedFeature = false;
     ThereAreAltStreams = false;
+    UnsupportedFeature = false;
+    UnsupportedMethod = false;
     
     ProgressVal_Cur = 0;
     ProgressVal_Prev = 0;
     ProgressVal_NumFilesTotal = 0;
+
+    MethodsMask = 0;
     
     Vols.Clear();
     Refs2.Clear();
@@ -1686,10 +2018,17 @@ struct CDatabase
 
   HRESULT SeekReadBlock_FALSE(UInt64 oid, void *data);
   void GetItemPath(unsigned index, const CNode *inode, NWindows::NCOM::CPropVariant &path) const;
-  HRESULT ReadMap(UInt64 oid, CMap &map, unsigned recurseLevel);
-  HRESULT ReadObjectMap(UInt64 oid, CObjectMap &map);
+  HRESULT ReadMap(UInt64 oid, bool noHeader, CVol *vol, const Byte *hash,
+      CMap &map, unsigned recurseLevel);
+  HRESULT ReadObjectMap(UInt64 oid, CVol *vol, CObjectMap &map);
   HRESULT OpenVolume(const CObjectMap &omap, const oid_t fs_oid);
   HRESULT Open2();
+
+  HRESULT GetAttrStream(IInStream *apfsInStream, const CVol &vol,
+      const CAttr &attr, ISequentialInStream **stream);
+
+  HRESULT GetAttrStream_dstream(IInStream *apfsInStream, const CVol &vol,
+      const CAttr &attr, ISequentialInStream **stream);
 
   HRESULT GetStream2(
       IInStream *apfsInStream,
@@ -1704,14 +2043,14 @@ HRESULT CDatabase::SeekReadBlock_FALSE(UInt64 oid, void *data)
   {
     if (ProgressVal_Cur - ProgressVal_Prev >= (1 << 22))
     {
-      RINOK(OpenCallback->SetCompleted(NULL, &ProgressVal_Cur));
+      RINOK(OpenCallback->SetCompleted(NULL, &ProgressVal_Cur))
       ProgressVal_Prev = ProgressVal_Cur;
     }
     ProgressVal_Cur += sb.block_size;
   }
   if (oid == 0 || oid >= sb.block_count)
     return S_FALSE;
-  RINOK(OpenInStream->Seek(oid << sb.block_size_Log, STREAM_SEEK_SET, NULL));
+  RINOK(InStream_SeekSet(OpenInStream, oid << sb.block_size_Log))
   return ReadStream_FALSE(OpenInStream, data, sb.block_size);
 }
 
@@ -1729,8 +2068,23 @@ API_FUNC_static_IsArc IsArc_APFS(const Byte *p, size_t size)
 }
 
 
+static bool CheckHash(unsigned hashAlgo, const Byte *data, size_t size, const Byte *digest)
+{
+  if (hashAlgo == APFS_HASH_SHA256)
+  {
+    MY_ALIGN (16)
+    CSha256 sha;
+    Sha256_Init(&sha);
+    Sha256_Update(&sha, data, size);
+    return Sha256_Final_and_CheckDigest(&sha, digest);
+  }
+  return true;
+}
+
  
-HRESULT CDatabase::ReadMap(UInt64 oid, CMap &map, unsigned recurseLevel)
+HRESULT CDatabase::ReadMap(UInt64 oid, bool noHeader,
+    CVol *vol, const Byte *hash,
+    CMap &map, unsigned recurseLevel)
 {
   // is it allowed to use big number of levels ?
   if (recurseLevel > (1 << 10))
@@ -1747,12 +2101,16 @@ HRESULT CDatabase::ReadMap(UInt64 oid, CMap &map, unsigned recurseLevel)
   const Byte *buf;
   {
     CByteBuffer &buf2 = Buffers[recurseLevel];
-    RINOK(SeekReadBlock_FALSE(oid, buf2));
+    RINOK(SeekReadBlock_FALSE(oid, buf2))
     buf = buf2;
   }
 
+  if (hash && vol)
+    if (!CheckHash(vol->integrity.im_hash_type, buf, blockSize, hash))
+      return S_FALSE;
+
   CBTreeNodePhys bt;
-  if (!bt.Parse(buf, blockSize))
+  if (!bt.Parse(buf, blockSize, noHeader))
     return S_FALSE;
   
   map.NumNodes++;
@@ -1767,14 +2125,16 @@ HRESULT CDatabase::ReadMap(UInt64 oid, CMap &map, unsigned recurseLevel)
       - File-system records are sorted according to the rules listed in File-System Objects.
   */
   
-  if (bt.o.subtype != map.Subtype)
+  if (!noHeader)
+  if (bt.ophys.subtype != map.Subtype)
     return S_FALSE;
 
   unsigned endLimit = blockSize;
 
   if (recurseLevel == 0)
   {
-    if (bt.o.GetType() != OBJECT_TYPE_BTREE)
+    if (!noHeader)
+    if (bt.ophys.GetType() != OBJECT_TYPE_BTREE)
       return S_FALSE;
     if ((bt.flags & BTNODE_ROOT) == 0)
       return S_FALSE;
@@ -1788,6 +2148,8 @@ HRESULT CDatabase::ReadMap(UInt64 oid, CMap &map, unsigned recurseLevel)
       return S_FALSE;
     if (bti.Is_PHYSICAL() != map.IsPhysical)
       return S_FALSE;
+    if (bti.Is_NOHEADER() != noHeader)
+      return S_FALSE;
     // we don't allow volumes with big number of Keys
     const UInt32 kNumItemsMax = k_VectorSizeMax;
     if (map.bti.node_count > kNumItemsMax)
@@ -1797,7 +2159,8 @@ HRESULT CDatabase::ReadMap(UInt64 oid, CMap &map, unsigned recurseLevel)
   }
   else
   {
-    if (bt.o.GetType() != OBJECT_TYPE_BTREE_NODE)
+    if (!noHeader)
+    if (bt.ophys.GetType() != OBJECT_TYPE_BTREE_NODE)
       return S_FALSE;
     if ((bt.flags & BTNODE_ROOT) != 0)
       return S_FALSE;
@@ -1863,7 +2226,9 @@ HRESULT CDatabase::ReadMap(UInt64 oid, CMap &map, unsigned recurseLevel)
           const oid_t oidNext = Get64(p2);
           if (map.bti.Is_PHYSICAL())
           {
-            RINOK(ReadMap(oidNext, map, recurseLevel + 1));
+            RINOK(ReadMap(oidNext, noHeader, vol,
+                NULL, /* hash */
+                map, recurseLevel + 1))
             continue;
           }
           else
@@ -1898,10 +2263,38 @@ HRESULT CDatabase::ReadMap(UInt64 oid, CMap &map, unsigned recurseLevel)
           continue;
         }
         {
-          if (a.v.off < 8 || a.v.len != 8)
+          if (a.v.len < 8)
             return S_FALSE;
+
+          const Byte *hashNew = NULL;
+          oid_t oidNext = Get64(p2);
+
+          if (bt.Is_HASHED())
+          {
+            if (!vol)
+              return S_FALSE;
+            /*
+            struct btn_index_node_val {
+              oid_t binv_child_oid;
+              uint8_t binv_child_hash[BTREE_NODE_HASH_SIZE_MAX];
+            };
+            */
+            /* (a.v.len == 40) is possible if Is_HASHED()
+               so there is hash (for example, 256-bit) after 64-bit id) */
+            if (a.v.len != 8 + vol->integrity.HashSize)
+              return S_FALSE;
+            hashNew = p2 + 8;
+            /* we need to add root_tree_oid here,
+               but where it's defined in apfs specification ? */
+            oidNext += vol->apfs.root_tree_oid;
+          }
+          else
+          {
+            if (a.v.len != 8)
+              return S_FALSE;
+          }
+
           // value is only 64-bit for non leaf.
-          const oid_t oidNext = Get64(p2);
 
           if (map.bti.Is_PHYSICAL())
           {
@@ -1910,15 +2303,25 @@ HRESULT CDatabase::ReadMap(UInt64 oid, CMap &map, unsigned recurseLevel)
             // RINOK(ReadMap(oidNext, map, recurseLevel + 1));
             // continue;
           }
+          /*
+          else if (map.bti.Is_EPHEMERAL())
+          {
+            // Ephemeral objects are stored in memory while the container is mounted and in a checkpoint when the container isn't mounted
+            // the code was not tested:
+            return S_FALSE;
+          }
+          */
           else
           {
+            /* nodes in the B-tree use virtual object identifiers to link to their child nodes. */
             const int index = map.Omap.FindKey(oidNext);
             if (index == -1)
               return S_FALSE;
             const omap_val &ov = map.Omap.Vals[(unsigned)index];
             if (ov.size != blockSize) // change it : it must be multiple of
               return S_FALSE;
-            RINOK(ReadMap(ov.paddr, map, recurseLevel + 1));
+            RINOK(ReadMap(ov.paddr, ov.IsFlag_NoHeader(), vol, hashNew,
+                map, recurseLevel + 1))
             continue;
           }
         }
@@ -1934,19 +2337,23 @@ HRESULT CDatabase::ReadMap(UInt64 oid, CMap &map, unsigned recurseLevel)
 
 
 
-HRESULT CDatabase::ReadObjectMap(UInt64 oid, CObjectMap &omap)
+HRESULT CDatabase::ReadObjectMap(UInt64 oid, CVol *vol, CObjectMap &omap)
 {
   CByteBuffer buf;
   const size_t blockSize = sb.block_size;
   buf.Alloc(blockSize);
-  RINOK(SeekReadBlock_FALSE(oid, buf));
+  RINOK(SeekReadBlock_FALSE(oid, buf))
   C_omap_phys op;
   if (!op.Parse(buf, blockSize, oid))
     return S_FALSE;
   CMap map;
   map.Subtype = OBJECT_TYPE_OMAP;
   map.IsPhysical = true;
-  RINOK(ReadMap(op.tree_oid, map, 0));
+  RINOK(ReadMap(op.tree_oid,
+      false /* noHeader */,
+      vol,
+      NULL, /* hash */
+      map, 0))
   if (!omap.Parse(map.Pairs))
     return S_FALSE;
   return S_OK;
@@ -1960,7 +2367,7 @@ HRESULT CDatabase::Open2()
   CSuperBlock2 sb2;
   {
     Byte buf[kApfsHeaderSize];
-    RINOK(ReadStream_FALSE(OpenInStream, buf, kApfsHeaderSize));
+    RINOK(ReadStream_FALSE(OpenInStream, buf, kApfsHeaderSize))
     if (!sb.Parse(buf))
       return S_FALSE;
     sb2.Parse(buf);
@@ -1968,7 +2375,9 @@ HRESULT CDatabase::Open2()
 
   {
     CObjectMap omap;
-    RINOK(ReadObjectMap(sb.omap_oid, omap));
+    RINOK(ReadObjectMap(sb.omap_oid,
+        NULL, /* CVol */
+        omap))
     unsigned numRefs = 0;
     for (unsigned i = 0; i < sb.max_file_systems; i++)
     {
@@ -1976,7 +2385,7 @@ HRESULT CDatabase::Open2()
       if (oid == 0)
         continue;
       // for (unsigned k = 0; k < 1; k++) // for debug
-      RINOK(OpenVolume(omap, oid));
+      RINOK(OpenVolume(omap, oid))
       const unsigned a = Vols.Back().Refs.Size();
       numRefs += a;
       if (numRefs < a)
@@ -2042,7 +2451,7 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
     if (ov.size != blockSize) // change it : it must be multiple of
       return S_FALSE;
     buf.Alloc(blockSize);
-    RINOK(SeekReadBlock_FALSE(ov.paddr, buf));
+    RINOK(SeekReadBlock_FALSE(ov.paddr, buf))
   }
 
   CVol &vol = Vols.AddNew();
@@ -2051,14 +2460,107 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
   if (!apfs.Parse(buf, blockSize))
     return S_FALSE;
 
+  if (apfs.fext_tree_oid != 0)
+  {
+    if ((apfs.incompatible_features & APFS_INCOMPAT_SEALED_VOLUME) == 0)
+      return S_FALSE;
+    if ((apfs.fext_tree_type & OBJ_PHYSICAL) == 0)
+      return S_FALSE;
+    if ((apfs.fext_tree_type & OBJECT_TYPE_MASK) != OBJECT_TYPE_BTREE)
+      return S_FALSE;
+
+    CMap map2;
+    map2.Subtype = OBJECT_TYPE_FEXT_TREE;
+    map2.IsPhysical = true;
+
+    RINOK(ReadMap(apfs.fext_tree_oid,
+        false /* noHeader */,
+        &vol,
+        NULL, /* hash */
+        map2, 0))
+
+    UInt64 prevId = 1;
+
+    FOR_VECTOR (i, map2.Pairs)
+    {
+      if (OpenCallback && (i & 0xffff) == 1)
+      {
+        const UInt64 numFiles = ProgressVal_NumFilesTotal +
+            (vol.Items.Size() + vol.Nodes.Size()) / 2;
+        RINOK(OpenCallback->SetCompleted(&numFiles, &ProgressVal_Cur))
+      }
+      // The key half of a record from a file extent tree.
+      // struct fext_tree_key
+      const CKeyValPair &pair = map2.Pairs[i];
+      if (pair.Key.Size() != 16)
+        return S_FALSE;
+      const Byte *p = pair.Key;
+      const UInt64 id = GetUi64(p);
+      if (id < prevId)
+        return S_FALSE;  // IDs must be sorted
+      prevId = id;
+
+      CExtent ext;
+      ext.logical_offset = GetUi64(p + 8);
+      {
+        if (pair.Val.Size() != 16)
+          return S_FALSE;
+        const Byte *p2 = pair.Val;
+        ext.len_and_flags = GetUi64(p2);
+        ext.phys_block_num = GetUi64(p2 + 8);
+      }
+
+      PRF(printf("\n%6d: id=%6d logical_addr = %2d len_and_flags=%5x phys_block_num = %5d",
+          i, (unsigned)id,
+          (unsigned)ext.logical_offset,
+          (unsigned)ext.len_and_flags,
+          (unsigned)ext.phys_block_num));
+
+      if (vol.FEXT_NodeIDs.IsEmpty() ||
+          vol.FEXT_NodeIDs.Back() != id)
+      {
+        vol.FEXT_NodeIDs.Add(id);
+        vol.FEXT_Nodes.AddNew();
+      }
+      CRecordVector<CExtent> &extents = vol.FEXT_Nodes.Back().Extents;
+      if (!extents.IsEmpty())
+        if (ext.logical_offset != extents.Back().GetEndOffset())
+          return S_FALSE;
+      extents.Add(ext);
+      continue;
+    }
+
+    PRF(printf("\n\n"));
+  }
+
   /* For each volume, read the root file system tree's virtual object
      identifier from the apfs_root_tree_oid field,
      and then look it up in the volume object map indicated
      by the omap_oid field. */
 
   CMap map;
+  ReadObjectMap(apfs.omap_oid, &vol, map.Omap);
+
+  const Byte *hash_for_root = NULL;
+
+  if (apfs.integrity_meta_oid != 0)
   {
-    ReadObjectMap(apfs.omap_oid, map.Omap);
+    if ((apfs.incompatible_features & APFS_INCOMPAT_SEALED_VOLUME) == 0)
+      return S_FALSE;
+    const int index = map.Omap.FindKey(apfs.integrity_meta_oid);
+    if (index == -1)
+      return S_FALSE;
+    const omap_val &ov = map.Omap.Vals[(unsigned)index];
+    if (ov.size != blockSize)
+      return S_FALSE;
+    RINOK(SeekReadBlock_FALSE(ov.paddr, buf))
+    if (!vol.integrity.Parse(buf, blockSize, apfs.integrity_meta_oid))
+      return S_FALSE;
+    if (vol.integrity.im_hash_type != 0)
+      hash_for_root = vol.integrity.Hash;
+  }
+
+  {
     const int index = map.Omap.FindKey(apfs.root_tree_oid);
     if (index == -1)
       return S_FALSE;
@@ -2067,10 +2569,12 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
       return S_FALSE;
     map.Subtype = OBJECT_TYPE_FSTREE;
     map.IsPhysical = false;
-    RINOK(ReadMap(ov.paddr, map, 0));
+    RINOK(ReadMap(ov.paddr, ov.IsFlag_NoHeader(),
+        &vol, hash_for_root,
+        map, 0))
   }
 
-  bool NeedReadSymLink = false;
+  bool needParseAttr = false;
 
   {
     const bool isHashed = apfs.IsHashedName();
@@ -2090,9 +2594,12 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
       if (OpenCallback)
       {
         const UInt64 numFiles = ProgressVal_NumFilesTotal + numApfsItems;
-        RINOK(OpenCallback->SetTotal(&numFiles, NULL));
+        RINOK(OpenCallback->SetTotal(&numFiles, NULL))
       }
     }
+
+    CAttr attr;
+    CItem item;
 
     FOR_VECTOR (i, map.Pairs)
     {
@@ -2100,7 +2607,7 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
       {
         const UInt64 numFiles = ProgressVal_NumFilesTotal +
             (vol.Items.Size() + vol.Nodes.Size()) / 2;
-        RINOK(OpenCallback->SetCompleted(&numFiles, &ProgressVal_Cur));
+        RINOK(OpenCallback->SetCompleted(&numFiles, &ProgressVal_Cur))
       }
 
       const CKeyValPair &pair = map.Pairs[i];
@@ -2115,11 +2622,11 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
         return S_FALSE;  // IDs must be sorted
       prevId = id;
 
-      PRF(printf("\n%6d: id=%6d type = %2d", i, (unsigned)id, type));
+      PRF(printf("\n%6d: id=%6d type = %2d ", i, (unsigned)id, type));
       
       if (type == APFS_TYPE_INODE)
       {
-        PRF(printf ("  INODE"));
+        PRF(printf("INODE"));
         if (pair.Key.Size() != 8 ||
             pair.Val.Size() < k_SizeOf_j_inode_val)
           return S_FALSE;
@@ -2159,6 +2666,9 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
           UInt32 offset = 4 + (UInt32)xf_num_exts * 4;
           if (offset + xf_used_data != extraSize)
             return S_FALSE;
+
+          PRF(printf(" parent_id = %d", (unsigned)inode.parent_id));
+
           for (unsigned k = 0; k < xf_num_exts; k++)
           {
             // struct x_field
@@ -2232,7 +2742,7 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
         if (nameOffset + len != pair.Key.Size())
           return S_FALSE;
 
-        CAttr attr;
+        attr.Clear();
         attr.Name.SetFrom_CalcLen((const char *)p + nameOffset, len);
         if (attr.Name.Len() != len - 1)
           return S_FALSE;
@@ -2271,7 +2781,7 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
           attr.Id = Get64(p4);
           attr.dstream.Parse(p4 + 8);
           attr.dstream_defined = true;
-          PRF(printf(" streamID=%d", (unsigned)attr.Id));
+          PRF(printf(" streamID=%d streamSize=%d", (unsigned)attr.Id, (unsigned)attr.dstream.size));
         }
         else
         {
@@ -2287,15 +2797,25 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
           // UnsupportedFeature = true;
           // continue;
         }
+        
         CNode &inode = vol.Nodes.Back();
+        
         if (attr.Name.IsEqualTo("com.apple.fs.symlink"))
         {
           inode.SymLinkIndex = inode.Attrs.Size();
           if (attr.Is_dstream_OK_for_SymLink())
-            NeedReadSymLink = true;
+            needParseAttr = true;
         }
-        else
-          vol.NumAltStreams++;
+        else if (attr.Name.IsEqualTo("com.apple.decmpfs"))
+        {
+          inode.DecmpfsIndex = inode.Attrs.Size();
+          // if (attr.dstream_defined)
+          needParseAttr = true;
+        }
+        else if (attr.Name.IsEqualTo("com.apple.ResourceFork"))
+        {
+          inode.ResourceIndex = inode.Attrs.Size();
+        }
         inode.Attrs.Add(attr);
         continue;
       }
@@ -2311,7 +2831,7 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
         const UInt32 refcnt = Get32(pair.Val);
 
         // The data stream record can be deleted when its reference count reaches zero.
-        PRF(printf("  refcnt = %8d", (unsigned)refcnt));
+        PRF(printf("  refcnt = %d", (unsigned)refcnt));
 
         if (vol.NodeIDs.IsEmpty())
           return S_FALSE;
@@ -2332,6 +2852,7 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
         inode.refcnt_defined = true;
         if (inode.refcnt != (UInt32)inode.nlink)
         {
+          PRF(printf(" refcnt != nlink"));
           // is it possible ?
           // return S_FALSE;
         }
@@ -2431,7 +2952,10 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
         }
         if (nameOffset + len != pair.Key.Size())
           return S_FALSE;
-        CItem item;
+        
+        // CItem item;
+        item.Clear();
+
         item.ParentId = id;
         item.Name.SetFrom_CalcLen((const char *)p + nameOffset, len);
         if (item.Name.Len() != len - 1)
@@ -2458,58 +2982,232 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
         if (id == PRIV_DIR_INO_NUM)
           vol.NumItems_In_PrivateDir++;
         
-        PRF(printf("  next=%6d flags=%2x %s",
+        PRF(printf(" DIR_REC next=%6d flags=%2x %s",
             (unsigned)item.Val.file_id,
             (unsigned)item.Val.flags,
             item.Name.Ptr()));
         continue;
       }
-   
+
+      if (type == APFS_TYPE_FILE_INFO)
+      {
+        if (pair.Key.Size() != 16)
+          return S_FALSE;
+        // j_file_info_key
+        const UInt64 info_and_lba = Get64(p + 8);
+       
+      #define J_FILE_INFO_LBA_MASK    0x00ffffffffffffffUL
+      // #define J_FILE_INFO_TYPE_MASK   0xff00000000000000UL
+      #define J_FILE_INFO_TYPE_SHIFT  56
+      #define APFS_FILE_INFO_DATA_HASH 1
+        
+        const unsigned infoType = (unsigned)(info_and_lba >> J_FILE_INFO_TYPE_SHIFT);
+        // address is a paddr_t
+        const UInt64 lba = info_and_lba & J_FILE_INFO_LBA_MASK;
+        // j_file_data_hash_val_t
+        /* Use this field of the union if the type stored in the info_and_lba field of j_file_info_val_t is
+           APFS_FILE_INFO_DATA_HASH */
+        if (infoType != APFS_FILE_INFO_DATA_HASH)
+          return S_FALSE;
+        if (pair.Val.Size() != 3 + vol.integrity.HashSize)
+          return S_FALSE;
+        /*
+        struct j_file_data_hash_val
+        {
+          UInt16 hashed_len; // The length, in blocks, of the data segment that was hashed.
+          UInt8 hash_size; // must be consistent with integrity_meta_phys_t::im_hash_type
+          UInt8 hash[0];
+        }
+        */
+
+        const unsigned hash_size = pair.Val[2];
+        if (hash_size != vol.integrity.HashSize)
+          return S_FALSE;
+
+        CHashChunk hr;
+        hr.hashed_len = GetUi16(pair.Val);
+        if (hr.hashed_len == 0)
+          return S_FALSE;
+        memcpy(hr.hash, (const Byte *)pair.Val + 3, vol.integrity.HashSize);
+        // (hashed_len <= 4) : we have seen
+        hr.lba = lba;
+        
+        PRF(printf("   FILE_INFO lba = %6x, hashed_len=%6d",
+            (unsigned)lba,
+            (unsigned)hr.hashed_len));
+        
+        if (vol.Hash_IDs.IsEmpty() || vol.Hash_IDs.Back() != id)
+        {
+          vol.Hash_Vectors.AddNew();
+          vol.Hash_IDs.Add(id);
+        }
+        CStreamHashes &hashes = vol.Hash_Vectors.Back();
+        if (hashes.Size() != 0)
+        {
+          const CHashChunk &hr_Back = hashes.Back();
+          if (lba != hr_Back.lba + ((UInt64)hr_Back.hashed_len << sb.block_size_Log))
+            return S_FALSE;
+        }
+        hashes.Add(hr);
+        continue;
+      }
+
+      if (type == APFS_TYPE_SNAP_METADATA)
+      {
+        if (pair.Key.Size() != 8)
+          return S_FALSE;
+        PRF(printf(" SNAP_METADATA"));
+        // continue;
+      }
+
+      /* SIBLING items are used, if there are more than one hard link to some inode
+         key                                     : value
+         parent_id_1  DIR_REC                    : inode_id, name_1
+         parent_id_2  DIR_REC                    : inode_id, name_2
+         inode_id     INODE                      : parent_id_1, name_1
+         inode_id     SIBLING_LINK  sibling_id_1 : parent_id_1, name_1
+         inode_id     SIBLING_LINK  sibling_id_2 : parent_id_2, name_2
+         sibling_id_1 SIBLING_MAP                : inode_id
+         sibling_id_2 SIBLING_MAP                : inode_id
+      */
+      
+      if (type == APFS_TYPE_SIBLING_LINK)
+      {
+        if (pair.Key.Size() != 16)
+          return S_FALSE;
+        if (pair.Val.Size() < 10 + 1)
+          return S_FALSE;
+        /*
+        // struct j_sibling_key
+        // The sibling's unique identifier.
+        // This value matches the object identifier for the sibling map record
+        const UInt64 sibling_id = Get64(p + 8);
+        // struct j_sibling_val
+        const Byte *v = pair.Val;
+        const UInt64 parent_id = Get64(v); // The object identifier for the inode that's the parent directory.
+        const unsigned name_len = Get16(v + 8); // len including the final null character
+        if (10 + name_len != pair.Val.Size())
+          return S_FALSE;
+        if (v[10 + name_len - 1] != 0)
+          return S_FALSE;
+        AString name ((const char *)(v + 10));
+        if (name.Len() != name_len - 1)
+          return S_FALSE;
+        PRF(printf(" SIBLING_LINK sibling_id = %6d : parent_id=%6d %s",
+            (unsigned)sibling_id, (unsigned)parent_id, name.Ptr()));
+        */
+        continue;
+      }
+      
+      if (type == APFS_TYPE_SIBLING_MAP)
+      {
+        // struct j_sibling_map_key
+        // The object identifier in the header is the sibling's unique identifier
+        if (pair.Key.Size() != 8 || pair.Val.Size() != 8)
+          return S_FALSE;
+        /*
+        // j_sibling_map_val
+        // The inode number of the underlying file
+        const UInt64 file_id = Get64(pair.Val);
+        PRF(printf(" SIBLING_MAP : file_id = %d", (unsigned)file_id));
+        */
+        continue;
+      }
+      
       UnsupportedFeature = true;
       // return S_FALSE;
     }
     ProgressVal_NumFilesTotal += vol.Items.Size();
   }
 
-  if (NeedReadSymLink)
+
+  if (needParseAttr)
   {
-    /* we read external streams for SymLinks to CAttr.Data
+    /* we read external streams for attributes
        So we can get SymLink for GetProperty(kpidSymLink) later */
     FOR_VECTOR (i, vol.Nodes)
     {
       CNode &node = vol.Nodes[i];
-      if (IsViNotDef(node.SymLinkIndex))
-        continue;
-      CAttr &attr = node.Attrs[(unsigned)node.SymLinkIndex];
-      // FOR_VECTOR (k, node.Attrs) { CAttr &attr = node.Attrs[(unsigned)k]; // for debug
-      if (attr.Data.Size() != 0
-          || !attr.Is_dstream_OK_for_SymLink())
-        continue;
-      const UInt32 size = (UInt32)attr.dstream.size;
-      const int idIndex = vol.SmallNodeIDs.FindInSorted(attr.Id);
-      if (idIndex == -1)
-        continue;
-      CMyComPtr<ISequentialInStream> inStream;
-      const HRESULT res = GetStream2(
-          OpenInStream,
-          &vol.SmallNodes[(unsigned)idIndex].Extents,
-          size, &inStream);
-      if (res == S_OK && inStream)
+
+      FOR_VECTOR (a, node.Attrs)
       {
-        CByteBuffer buf2;
-        buf2.Alloc(size);
-        if (ReadStream_FAIL(inStream, buf2, size) == S_OK)
-          attr.Data = buf2;
+        CAttr &attr = node.Attrs[a];
+        if (attr.Data.Size() != 0 || !attr.dstream_defined)
+          continue;
+        if (a == node.SymLinkIndex)
+        {
+          if (!attr.Is_dstream_OK_for_SymLink())
+            continue;
+        }
+        else
+        {
+          if (a != node.DecmpfsIndex
+              // && a != node.ResourceIndex
+              )
+          continue;
+        }
+        // we don't expect big streams here
+        // largest dstream for Decmpfs attribute is (2Kib+17)
+        if (attr.dstream.size > ((UInt32)1 << 16))
+          continue;
+        CMyComPtr<ISequentialInStream> inStream;
+        const HRESULT res = GetAttrStream_dstream(OpenInStream, vol, attr, &inStream);
+        if (res == S_OK && inStream)
+        {
+          CByteBuffer buf2;
+          const size_t size = (size_t)attr.dstream.size;
+          buf2.Alloc(size);
+          if (ReadStream_FAIL(inStream, buf2, size) == S_OK)
+            attr.Data = buf2;
+
+          ProgressVal_Cur += size;
+          if (OpenCallback)
+          if (ProgressVal_Cur - ProgressVal_Prev >= (1 << 22))
+          {
+
+            RINOK(OpenCallback->SetCompleted(
+                &ProgressVal_NumFilesTotal,
+                &ProgressVal_Cur))
+            ProgressVal_Prev = ProgressVal_Cur;
+          }
+        }
+      }
+
+      if (node.Has_UNCOMPRESSED_SIZE())
+      if (IsViDef(node.DecmpfsIndex))
+      {
+        CAttr &attr = node.Attrs[node.DecmpfsIndex];
+        node.CompressHeader.Parse(attr.Data, attr.Data.Size());
+        
+        if (node.CompressHeader.IsCorrect)
+          if (node.CompressHeader.Method < sizeof(MethodsMask) * 8)
+            MethodsMask |= ((UInt32)1 << node.CompressHeader.Method);
+
+        if (node.CompressHeader.IsCorrect
+            && node.CompressHeader.IsSupported
+            && node.CompressHeader.UnpackSize == node.uncompressed_size)
+        {
+          attr.NeedShow = false;
+          if (node.CompressHeader.IsMethod_Resource()
+              && IsViDef(node.ResourceIndex))
+            node.Attrs[node.ResourceIndex].NeedShow = false;
+        }
+        else
+        {
+          vol.UnsupportedMethod = true;
+        }
       }
     }
   }
-  
+
   const HRESULT res = vol.FillRefs();
 
   if (vol.ThereAreErrors())
     HeadersError = true;
   if (vol.UnsupportedFeature)
     UnsupportedFeature = true;
+  if (vol.UnsupportedMethod)
+    UnsupportedMethod = true;
   if (vol.NumAltStreams != 0)
     ThereAreAltStreams = true;
   
@@ -2521,9 +3219,10 @@ HRESULT CDatabase::OpenVolume(const CObjectMap &omap, const oid_t fs_oid)
 HRESULT CVol::FillRefs()
 {
   {
+    Refs.Reserve(Items.Size());
     // we fill Refs[*]
     // we
-    // and set Nodes[*].ItemIndex for Nodes that are dictories;
+    // and set Nodes[*].ItemIndex for Nodes that are directories;
     FOR_VECTOR (i, Items)
     {
       CItem &item = Items[i];
@@ -2593,12 +3292,17 @@ HRESULT CVol::FillRefs()
           ref.ParentRefIndex = item.RefIndex;
           for (unsigned k = 0; k < numAttrs; k++)
           {
+            // comment it for debug
+            const CAttr &attr = inode.Attrs[k];
+            if (!attr.NeedShow)
+              continue;
+
             if (k == inode.SymLinkIndex)
               continue;
             ref.AttrIndex = k;
+            NumAltStreams++;
             Refs.Add(ref);
             /*
-            const CAttr &attr = inode.Attrs[k];
             if (attr.dstream_defined)
             {
               const int idIndex = SmallNodeIDs.FindInSorted(attr.Id);
@@ -2732,38 +3436,39 @@ HRESULT CVol::FillRefs()
 
 
 
-class CHandler:
+Z7_class_CHandler_final:
   public IInArchive,
   public IArchiveGetRawProps,
   public IInArchiveGetStream,
   public CMyUnknownImp,
   public CDatabase
 {
+  Z7_IFACES_IMP_UNK_3(
+      IInArchive,
+      IArchiveGetRawProps,
+      IInArchiveGetStream)
+
   CMyComPtr<IInStream> _stream;
-public:
-  MY_UNKNOWN_IMP3(IInArchive, IArchiveGetRawProps, IInArchiveGetStream)
-  INTERFACE_IInArchive(;)
-  INTERFACE_IArchiveGetRawProps(;)
-  STDMETHOD(GetStream)(UInt32 index, ISequentialInStream **stream);
+  int FindHashIndex_for_Item(UInt32 index);
 };
 
 
-STDMETHODIMP CHandler::Open(IInStream *inStream,
+Z7_COM7F_IMF(CHandler::Open(IInStream *inStream,
     const UInt64 * /* maxCheckStartPosition */,
-    IArchiveOpenCallback *callback)
+    IArchiveOpenCallback *callback))
 {
   COM_TRY_BEGIN
   Close();
   OpenInStream = inStream;
   OpenCallback = callback;
-  RINOK(Open2());
+  RINOK(Open2())
   _stream = inStream;
   return S_OK;
   COM_TRY_END
 }
 
 
-STDMETHODIMP CHandler::Close()
+Z7_COM7F_IMF(CHandler::Close())
 {
   _stream.Release();
   Clear();
@@ -2780,6 +3485,7 @@ enum
   kpidAddTime,
   kpidGeneration,
   kpidBsdFlags
+  // kpidUncompressedSize
 };
 
 static const CStatProp kProps[] =
@@ -2793,11 +3499,13 @@ static const CStatProp kProps[] =
   { NULL, kpidATime, VT_FILETIME },
   { NULL, kpidChangeTime, VT_FILETIME },
   { "Added Time", kpidAddTime, VT_FILETIME },
+  { NULL, kpidMethod, VT_BSTR },
   { NULL, kpidINode, VT_UI8 },
   { NULL, kpidLinks, VT_UI4 },
   { NULL, kpidSymLink, VT_BSTR },
   { NULL, kpidUserId, VT_UI4 },
   { NULL, kpidGroupId, VT_UI4 },
+  { NULL, kpidCharacts, VT_BSTR },
  #ifdef APFS_SHOW_ALT_STREAMS
   { NULL, kpidIsAltStream, VT_BOOL },
  #endif
@@ -2807,12 +3515,14 @@ static const CStatProp kProps[] =
   { "Written Size", kpidBytesWritten, VT_UI8 },
   { "Read Size", kpidBytesRead, VT_UI8 },
   { "BSD Flags", kpidBsdFlags, VT_UI4 }
+  // , { "Uncompressed Size", kpidUncompressedSize, VT_UI8 }
 };
 
 
 static const Byte kArcProps[] =
 {
   kpidName,
+  kpidCharacts,
   kpidId,
   kpidClusterSize,
   kpidCTime,
@@ -2835,7 +3545,7 @@ static void ApfsTimeToProp(UInt64 hfsTime, NWindows::NCOM::CPropVariant &prop)
 }
 
 
-STDMETHODIMP CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value)
+Z7_COM7F_IMF(CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value))
 {
   COM_TRY_BEGIN
   NWindows::NCOM::CPropVariant prop;
@@ -2848,6 +3558,7 @@ STDMETHODIMP CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value)
       prop = (UInt64)sb.block_count << sb.block_size_Log;
       break;
     case kpidClusterSize: prop = (UInt32)(sb.block_size); break;
+    case kpidCharacts: NHfs::MethodsMaskToProp(MethodsMask, prop); break;
     case kpidMTime:
       if (apfs)
         ApfsTimeToProp(apfs->modified_by[0].timestamp, prop);
@@ -2869,6 +3580,7 @@ STDMETHODIMP CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value)
     {
       UInt32 flags = 0;
       if (UnsupportedFeature) flags |= kpv_ErrorFlags_UnsupportedFeature;
+      if (UnsupportedMethod) flags |= kpv_ErrorFlags_UnsupportedMethod;
       if (flags != 0)
         prop = flags;
       break;
@@ -2931,14 +3643,14 @@ STDMETHODIMP CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value)
 }
 
 
-STDMETHODIMP CHandler::GetNumRawProps(UInt32 *numProps)
+Z7_COM7F_IMF(CHandler::GetNumRawProps(UInt32 *numProps))
 {
   *numProps = 0;
   return S_OK;
 }
 
 
-STDMETHODIMP CHandler::GetRawPropInfo(UInt32 /* index */, BSTR *name, PROPID *propID)
+Z7_COM7F_IMF(CHandler::GetRawPropInfo(UInt32 /* index */, BSTR *name, PROPID *propID))
 {
   *name = NULL;
   *propID = 0;
@@ -2946,14 +3658,13 @@ STDMETHODIMP CHandler::GetRawPropInfo(UInt32 /* index */, BSTR *name, PROPID *pr
 }
 
 
-STDMETHODIMP CHandler::GetParent(UInt32 index, UInt32 *parent, UInt32 *parentType)
+Z7_COM7F_IMF(CHandler::GetParent(UInt32 index, UInt32 *parent, UInt32 *parentType))
 {
   *parentType = NParentType::kDir;
 
   const CRef2 &ref2 = Refs2[index];
   const CVol &vol = Vols[ref2.VolIndex];
   UInt32 parentIndex = (UInt32)(Int32)-1;
-  *parentType = NParentType::kDir;
 
   if (IsViDef(ref2.RefIndex))
   {
@@ -2973,13 +3684,13 @@ STDMETHODIMP CHandler::GetParent(UInt32 index, UInt32 *parent, UInt32 *parentTyp
 }
 
 
-STDMETHODIMP CHandler::GetRawProp(UInt32 index, PROPID propID, const void **data, UInt32 *dataSize, UInt32 *propType)
+Z7_COM7F_IMF(CHandler::GetRawProp(UInt32 index, PROPID propID, const void **data, UInt32 *dataSize, UInt32 *propType))
 {
   *data = NULL;
   *dataSize = 0;
   *propType = 0;
-  UNUSED_VAR(index);
-  UNUSED_VAR(propID);
+  UNUSED_VAR(index)
+  UNUSED_VAR(propID)
   return S_OK;
 }
 
@@ -2997,7 +3708,7 @@ static void AddNodeName(UString &s, const CNode &inode, UInt64 id)
   s.Add_UInt64(id);
   if (!inode.PrimaryName.IsEmpty())
   {
-    s += '.';
+    s.Add_Dot();
     UString s2;
     Utf8Name_to_InterName(inode.PrimaryName, s2);
     s += s2;
@@ -3017,6 +3728,7 @@ void CDatabase::GetItemPath(unsigned index, const CNode *inode, NWindows::NCOM::
   {
     const CRef &ref = vol.Refs[ref2.RefIndex];
     unsigned cur = ref.ItemIndex;
+    UString s2;
     if (IsViNotDef(cur))
     {
       if (inode)
@@ -3032,14 +3744,13 @@ void CDatabase::GetItemPath(unsigned index, const CNode *inode, NWindows::NCOM::
           break;
         }
         const CItem &item = vol.Items[(unsigned)cur];
-        UString s2;
         Utf8Name_to_InterName(item.Name, s2);
         // s2 += "a\\b"; // for debug
         s.Insert(0, s2);
         cur = item.ParentItemIndex;
         if (IsViNotDef(cur))
           break;
-        // ParentItemIndex was not set for sch items
+        // ParentItemIndex was not set for such items
         // if (item.ParentId == ROOT_DIR_INO_NUM) break;
         s.InsertAtFront(WCHAR_PATH_SEPARATOR);
       }
@@ -3049,7 +3760,6 @@ void CDatabase::GetItemPath(unsigned index, const CNode *inode, NWindows::NCOM::
     if (IsViDef(ref.AttrIndex) && inode)
     {
       s += ':';
-      UString s2;
       Utf8Name_to_InterName(inode->Attrs[(unsigned)ref.AttrIndex].Name, s2);
       // s2 += "a\\b"; // for debug
       s += s2;
@@ -3069,7 +3779,7 @@ void CDatabase::GetItemPath(unsigned index, const CNode *inode, NWindows::NCOM::
 
 
 
-STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *value)
+Z7_COM7F_IMF(CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *value))
 {
   COM_TRY_BEGIN
   NWindows::NCOM::CPropVariant prop;
@@ -3110,11 +3820,10 @@ STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *val
       break;
     case kpidPrimeName:
     {
-      if (inode
-         #ifdef APFS_SHOW_ALT_STREAMS
-          && !ref.IsAltStream()
-         #endif
-          && !inode->PrimaryName.IsEmpty())
+     #ifdef APFS_SHOW_ALT_STREAMS
+      if (!ref.IsAltStream())
+     #endif
+      if (inode && !inode->PrimaryName.IsEmpty())
       {
         UString s;
         ConvertUTF8ToUnicode(inode->PrimaryName, s);
@@ -3155,6 +3864,9 @@ STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *val
     }
 
     case kpidSymLink:
+     #ifdef APFS_SHOW_ALT_STREAMS
+      if (!ref.IsAltStream())
+     #endif
       if (inode)
       {
         if (inode->IsSymLink() && IsViDef(inode->SymLinkIndex))
@@ -3178,8 +3890,9 @@ STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *val
     case kpidSize:
       if (inode)
       {
-        UInt64 size;
-        if (inode->GetSize(ref.GetAttrIndex(), size))
+        UInt64 size = 0;
+        if (inode->GetSize(ref.GetAttrIndex(), size) ||
+            !inode->IsDir())
           prop = size;
       }
       break;
@@ -3188,18 +3901,53 @@ STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *val
       if (inode)
       {
         UInt64 size;
-        if (inode->GetPackSize(ref.GetAttrIndex(), size))
+        if (inode->GetPackSize(ref.GetAttrIndex(), size) ||
+            !inode->IsDir())
           prop = size;
       }
       break;
 
+    case kpidMethod:
+     #ifdef APFS_SHOW_ALT_STREAMS
+      if (!ref.IsAltStream())
+     #endif
+      if (inode)
+      {
+        if (inode->CompressHeader.IsCorrect)
+          inode->CompressHeader.MethodToProp(prop);
+        else if (IsViDef(inode->DecmpfsIndex))
+          prop = "decmpfs";
+        else if (!inode->IsDir() && !inode->dstream_defined)
+        {
+          if (inode->IsSymLink())
+          {
+            if (IsViDef(inode->SymLinkIndex))
+              prop = "symlink";
+          }
+          // else prop = "no_dstream";
+        }
+      }
+      break;
+    
+    /*
+    case kpidUncompressedSize:
+      if (inode && inode->Has_UNCOMPRESSED_SIZE())
+        prop = inode->uncompressed_size;
+      break;
+    */
+
     case kpidIsDir:
     {
       bool isDir = false;
-      if (inode)
-        isDir = inode->IsDir();
-      else if (item)
-        isDir = item->Val.IsFlags_Dir();
+     #ifdef APFS_SHOW_ALT_STREAMS
+      if (!ref.IsAltStream())
+     #endif
+      {
+        if (inode)
+          isDir = inode->IsDir();
+        else if (item)
+          isDir = item->Val.IsFlags_Dir();
+      }
       prop = isDir;
       break;
     }
@@ -3251,6 +3999,9 @@ STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *val
    #endif
      
     case kpidCharacts:
+     #ifdef APFS_SHOW_ALT_STREAMS
+      if (!ref.IsAltStream())
+     #endif
       if (inode)
       {
         FLAGS_TO_PROP(g_INODE_Flags, (UInt32)inode->internal_flags, prop);
@@ -3258,6 +4009,9 @@ STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *val
       break;
 
     case kpidBsdFlags:
+     #ifdef APFS_SHOW_ALT_STREAMS
+      if (!ref.IsAltStream())
+     #endif
       if (inode)
       {
         FLAGS_TO_PROP(g_INODE_BSD_Flags, inode->bsd_flags, prop);
@@ -3265,6 +4019,9 @@ STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *val
       break;
 
     case kpidGeneration:
+     #ifdef APFS_SHOW_ALT_STREAMS
+      // if (!ref.IsAltStream())
+     #endif
       if (inode)
         prop = inode->write_generation_counter;
       break;
@@ -3280,6 +4037,9 @@ STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *val
       break;
 
     case kpidLinks:
+     #ifdef APFS_SHOW_ALT_STREAMS
+      if (!ref.IsAltStream())
+     #endif
       if (inode && !inode->IsDir())
         prop = (UInt32)inode->nlink;
       break;
@@ -3287,13 +4047,16 @@ STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *val
     case kpidINode:
      #ifdef APFS_SHOW_ALT_STREAMS
       // here we can disable iNode for alt stream.
-      // if (!ref.IsAltStream())
+      if (!ref.IsAltStream())
      #endif
       if (IsViDef(ref.NodeIndex))
         prop = (UInt32)vol.NodeIDs[ref.NodeIndex];
       break;
 
     case kpidParentINode:
+       #ifdef APFS_SHOW_ALT_STREAMS
+        if (!ref.IsAltStream())
+       #endif
       if (inode)
         prop = (UInt32)inode->parent_id;
       break;
@@ -3321,8 +4084,8 @@ UInt64 CDatabase::GetSize(const UInt32 index) const
 }
 
 
-STDMETHODIMP CHandler::Extract(const UInt32 *indices, UInt32 numItems,
-    Int32 testMode, IArchiveExtractCallback *extractCallback)
+Z7_COM7F_IMF(CHandler::Extract(const UInt32 *indices, UInt32 numItems,
+    Int32 testMode, IArchiveExtractCallback *extractCallback))
 {
   COM_TRY_BEGIN
   const bool allFilesMode = (numItems == (UInt32)(Int32)-1);
@@ -3339,7 +4102,7 @@ STDMETHODIMP CHandler::Extract(const UInt32 *indices, UInt32 numItems,
       const UInt32 index = allFilesMode ? i : indices[i];
       totalSize += GetSize(index);
     }
-    RINOK(extractCallback->SetTotal(totalSize));
+    RINOK(extractCallback->SetTotal(totalSize))
   }
 
   UInt64 currentTotalSize = 0, currentItemSize = 0;
@@ -3351,11 +4114,16 @@ STDMETHODIMP CHandler::Extract(const UInt32 *indices, UInt32 numItems,
   NCompress::CCopyCoder *copyCoderSpec = new NCompress::CCopyCoder();
   CMyComPtr<ICompressCoder> copyCoder = copyCoderSpec;
 
-  for (i = 0; i < numItems; i++, currentTotalSize += currentItemSize)
+  NHfs::CDecoder decoder;
+
+  for (i = 0;; i++, currentTotalSize += currentItemSize)
   {
     lps->InSize = currentTotalSize;
     lps->OutSize = currentTotalSize;
-    RINOK(lps->SetCur());
+    RINOK(lps->SetCur())
+
+    if (i >= numItems)
+      break;
 
     const UInt32 index = allFilesMode ? i : indices[i];
     const CRef2 &ref2 = Refs2[index];
@@ -3368,12 +4136,12 @@ STDMETHODIMP CHandler::Extract(const UInt32 *indices, UInt32 numItems,
     const Int32 askMode = testMode ?
         NExtract::NAskMode::kTest :
         NExtract::NAskMode::kExtract;
-    RINOK(extractCallback->GetStream(index, &realOutStream, askMode));
+    RINOK(extractCallback->GetStream(index, &realOutStream, askMode))
 
     if (IsViNotDef(ref2.RefIndex))
     {
-      RINOK(extractCallback->PrepareOperation(askMode));
-      RINOK(extractCallback->SetOperationResult(NExtract::NOperationResult::kOK));
+      RINOK(extractCallback->PrepareOperation(askMode))
+      RINOK(extractCallback->SetOperationResult(NExtract::NOperationResult::kOK))
       continue;
     }
 
@@ -3390,42 +4158,156 @@ STDMETHODIMP CHandler::Extract(const UInt32 *indices, UInt32 numItems,
 
     if (isDir)
     {
-      RINOK(extractCallback->PrepareOperation(askMode));
-      RINOK(extractCallback->SetOperationResult(NExtract::NOperationResult::kOK));
+      RINOK(extractCallback->PrepareOperation(askMode))
+      RINOK(extractCallback->SetOperationResult(NExtract::NOperationResult::kOK))
       continue;
     }
     if (!testMode && !realOutStream)
       continue;
-    RINOK(extractCallback->PrepareOperation(askMode));
+    RINOK(extractCallback->PrepareOperation(askMode))
     int opRes = NExtract::NOperationResult::kDataError;
 
-    CMyComPtr<ISequentialInStream> inStream;
-    if (GetStream(index, &inStream) == S_OK && inStream)
+    if (IsViDef(ref.NodeIndex))
     {
-      RINOK(copyCoder->Code(inStream, realOutStream, NULL, NULL, progress));
-      opRes = NExtract::NOperationResult::kDataError;
-      if (copyCoderSpec->TotalSize == currentItemSize)
-        opRes = NExtract::NOperationResult::kOK;
-      else if (copyCoderSpec->TotalSize < currentItemSize)
-        opRes = NExtract::NOperationResult::kUnexpectedEnd;
+      const CNode &inode = vol.Nodes[ref.NodeIndex];
+      if (
+        #ifdef APFS_SHOW_ALT_STREAMS
+          !ref.IsAltStream() &&
+        #endif
+             !inode.dstream_defined
+          && inode.Extents.IsEmpty()
+          && inode.Has_UNCOMPRESSED_SIZE()
+          && inode.uncompressed_size == inode.CompressHeader.UnpackSize)
+      {
+        if (inode.CompressHeader.IsSupported)
+        {
+          CMyComPtr<ISequentialInStream> inStreamFork;
+          UInt64 forkSize = 0;
+          const CByteBuffer *decmpfs_Data = NULL;
+          
+          if (inode.CompressHeader.IsMethod_Resource())
+          {
+            if (IsViDef(inode.ResourceIndex))
+            {
+              const CAttr &attr = inode.Attrs[inode.ResourceIndex];
+              forkSize = attr.GetSize();
+              GetAttrStream(_stream, vol, attr, &inStreamFork);
+            }
+          }
+          else
+          {
+            const CAttr &attr = inode.Attrs[inode.DecmpfsIndex];
+            decmpfs_Data = &attr.Data;
+          }
+          
+          if (inStreamFork || decmpfs_Data)
+          {
+            const HRESULT hres = decoder.Extract(
+                inStreamFork, realOutStream,
+                forkSize,
+                inode.CompressHeader,
+                decmpfs_Data,
+                currentTotalSize, extractCallback,
+                opRes);
+            if (hres != S_FALSE && hres != S_OK)
+              return hres;
+          }
+        }
+        else
+          opRes = NExtract::NOperationResult::kUnsupportedMethod;
+      }
+      else
+      {
+        CMyComPtr<ISequentialInStream> inStream;
+        if (GetStream(index, &inStream) == S_OK && inStream)
+        {
+          COutStreamWithHash *hashStreamSpec = NULL;
+          CMyComPtr<ISequentialOutStream> hashStream;
+          
+          if (vol.integrity.Is_SHA256())
+          {
+            const int hashIndex = FindHashIndex_for_Item(index);
+            if (hashIndex != -1)
+            {
+              hashStreamSpec = new COutStreamWithHash;
+              hashStream = hashStreamSpec;
+              hashStreamSpec->SetStream(realOutStream);
+              hashStreamSpec->Init(&(vol.Hash_Vectors[(unsigned)hashIndex]), sb.block_size_Log);
+            }
+          }
+          
+          RINOK(copyCoder->Code(inStream,
+              hashStream ? hashStream : realOutStream, NULL, NULL, progress))
+          opRes = NExtract::NOperationResult::kDataError;
+          if (copyCoderSpec->TotalSize == currentItemSize)
+          {
+            opRes = NExtract::NOperationResult::kOK;
+            if (hashStream)
+              if (!hashStreamSpec->FinalCheck())
+                opRes = NExtract::NOperationResult::kCRCError;
+          }
+          else if (copyCoderSpec->TotalSize < currentItemSize)
+            opRes = NExtract::NOperationResult::kUnexpectedEnd;
+        }
+      }
     }
     
     realOutStream.Release();
-    RINOK(extractCallback->SetOperationResult(opRes));
+    RINOK(extractCallback->SetOperationResult(opRes))
   }
   return S_OK;
   COM_TRY_END
 }
 
 
-STDMETHODIMP CHandler::GetNumberOfItems(UInt32 *numItems)
+Z7_COM7F_IMF(CHandler::GetNumberOfItems(UInt32 *numItems))
 {
   *numItems = Refs2.Size();
   return S_OK;
 }
 
 
-STDMETHODIMP CHandler::GetStream(UInt32 index, ISequentialInStream **stream)
+int CHandler::FindHashIndex_for_Item(UInt32 index)
+{
+  const CRef2 &ref2 = Refs2[index];
+  const CVol &vol = Vols[ref2.VolIndex];
+  if (IsViNotDef(ref2.RefIndex))
+    return -1;
+
+  const CRef &ref = vol.Refs[ref2.RefIndex];
+  if (IsViNotDef(ref.NodeIndex))
+    return -1;
+  const CNode &inode = vol.Nodes[ref.NodeIndex];
+
+  unsigned attrIndex = ref.GetAttrIndex();
+
+  if (IsViNotDef(attrIndex)
+      && !inode.dstream_defined
+      && inode.IsSymLink())
+  {
+    attrIndex = inode.SymLinkIndex;
+    if (IsViNotDef(attrIndex))
+      return -1;
+  }
+
+  if (IsViDef(attrIndex))
+  {
+    /* we have seen examples, where hash available for "com.apple.ResourceFork" stream.
+       these hashes for "com.apple.ResourceFork" stream are for unpacked data.
+       but the caller here needs packed data of stream. So we don't use hashes */
+    return -1;
+  }
+  else
+  {
+    if (!inode.dstream_defined)
+      return -1;
+    const UInt64 id = vol.NodeIDs[ref.NodeIndex];
+    return vol.Hash_IDs.FindInSorted(id);
+  }
+}
+
+
+Z7_COM7F_IMF(CHandler::GetStream(UInt32 index, ISequentialInStream **stream))
 {
   *stream = NULL;
 
@@ -3465,9 +4347,15 @@ STDMETHODIMP CHandler::GetStream(UInt32 index, ISequentialInStream **stream)
       return S_OK;
     }
     const int idIndex = vol.SmallNodeIDs.FindInSorted(attr.Id);
-    if (idIndex == -1)
-      return S_FALSE;
-    extents = &vol.SmallNodes[(unsigned)idIndex].Extents;
+    if (idIndex != -1)
+      extents = &vol.SmallNodes[(unsigned)idIndex].Extents;
+    else
+    {
+      const int fext_Index = vol.FEXT_NodeIDs.FindInSorted(attr.Id);
+      if (fext_Index == -1)
+        return S_FALSE;
+      extents = &vol.FEXT_Nodes[(unsigned)fext_Index].Extents;
+    }
     rem = attr.dstream.size;
   }
   else
@@ -3477,13 +4365,61 @@ STDMETHODIMP CHandler::GetStream(UInt32 index, ISequentialInStream **stream)
         return S_FALSE;
     if (inode.IsDir())
       return S_FALSE;
-    if (inode.dstream_defined)
-      rem = inode.dstream.size;
     extents = &inode.Extents;
+    if (inode.dstream_defined)
+    {
+      rem = inode.dstream.size;
+      if (inode.Extents.Size() == 0)
+      {
+        const int fext_Index = vol.FEXT_NodeIDs.FindInSorted(vol.NodeIDs[ref.NodeIndex]);
+        if (fext_Index != -1)
+          extents = &vol.FEXT_Nodes[(unsigned)fext_Index].Extents;
+      }
+    }
+    else
+    {
+      // return S_FALSE; // check it !!!  How zero size files are stored with dstream_defined?
+    }
   }
   return GetStream2(_stream, extents, rem, stream);
 }
 
+
+
+HRESULT CDatabase::GetAttrStream(IInStream *apfsInStream, const CVol &vol,
+    const CAttr &attr, ISequentialInStream **stream)
+{
+  *stream = NULL;
+  if (!attr.dstream_defined)
+  {
+    CBufInStream *streamSpec = new CBufInStream;
+    CMyComPtr<ISequentialInStream> streamTemp = streamSpec;
+    streamSpec->Init(attr.Data, attr.Data.Size(), (IInArchive *)this);
+    *stream = streamTemp.Detach();
+    return S_OK;
+  }
+  return GetAttrStream_dstream(apfsInStream, vol, attr, stream);
+}
+
+
+HRESULT CDatabase::GetAttrStream_dstream( IInStream *apfsInStream, const CVol &vol,
+    const CAttr &attr, ISequentialInStream **stream)
+{
+  const CRecordVector<CExtent> *extents;
+  {
+    const int idIndex = vol.SmallNodeIDs.FindInSorted(attr.Id);
+    if (idIndex != -1)
+      extents = &vol.SmallNodes[(unsigned)idIndex].Extents;
+    else
+    {
+      const int fext_Index = vol.FEXT_NodeIDs.FindInSorted(attr.Id);
+      if (fext_Index == -1)
+        return S_FALSE;
+      extents = &vol.FEXT_Nodes[(unsigned)fext_Index].Extents;
+    }
+  }
+  return GetStream2(apfsInStream, extents, attr.dstream.size, stream);
+}
 
 
 HRESULT CDatabase::GetStream2(

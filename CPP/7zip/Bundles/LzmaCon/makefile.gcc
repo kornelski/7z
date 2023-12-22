@@ -10,9 +10,18 @@ LOCAL_FLAGS_ST =
 MT_OBJS =
 
 
+ifdef SystemDrive
+IS_MINGW = 1
+else
+ifdef SYSTEMDRIVE
+# ifdef OS
+IS_MINGW = 1
+endif
+endif
+
 ifdef ST_MODE
 
-LOCAL_FLAGS_ST = -D_7ZIP_ST
+LOCAL_FLAGS_ST = -DZ7_ST
 
 else
 
@@ -30,7 +39,7 @@ endif
 
 LOCAL_FLAGS_SYS =
 
-ifdef SystemDrive
+ifdef IS_MINGW
 
 SYS_OBJS = \
   $O/Registry.o \
@@ -63,6 +72,7 @@ COMMON_OBJS = \
   $O/StringConvert.o \
   $O/StringToInt.o \
   $O/UTFConvert.o \
+  $O/Wildcard.o \
 
 WIN_OBJS = \
   $O/FileIO.o \
@@ -101,7 +111,7 @@ C_OBJS = \
   $O/Lzma86Enc.o \
 
 OBJS = \
-	$(LZMA_DEC_OPT_OBJS) \
+  $(LZMA_DEC_OPT_OBJS) \
   $(C_OBJS) \
   $(MT_OBJS) \
   $(SYS_OBJS) \
