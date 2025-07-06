@@ -7,9 +7,11 @@
 #include "../../../Windows/ErrorMsg.h"
 #include "../../../Windows/FileName.h"
 
-#ifndef _7ZIP_ST
+#ifndef Z7_ST
 #include "../../../Windows/Synchronization.h"
 #endif
+
+// #include "../Common/PropIDUtils.h"
 
 #include "ConsoleClose.h"
 #include "UserInputUtils.h"
@@ -17,7 +19,7 @@
 
 using namespace NWindows;
 
-#ifndef _7ZIP_ST
+#ifndef Z7_ST
 static NSynchronization::CCriticalSection g_CriticalSection;
 #define MT_LOCK NSynchronization::CCriticalSectionLock lock(g_CriticalSection);
 #else
@@ -134,7 +136,7 @@ HRESULT CUpdateCallbackConsole::OpenResult(
   {
     if (_so)
     {
-      RINOK(Print_OpenArchive_Props(*_so, codecs, arcLink));
+      RINOK(Print_OpenArchive_Props(*_so, codecs, arcLink))
       *_so << endl;
     }
   }
@@ -145,10 +147,10 @@ HRESULT CUpdateCallbackConsole::OpenResult(
     if (_se)
     {
       *_se << kError;
-      _se->NormalizePrint_wstr(name);
+      _se->NormalizePrint_wstr_Path(name);
       *_se << endl;
       HRESULT res = Print_OpenArchive_Error(*_se, codecs, arcLink);
-      RINOK(res);
+      RINOK(res)
       _se->Flush();
     }
   }
@@ -189,11 +191,27 @@ void CCallbackConsoleBase::CommonError(const FString &path, DWORD systemError, b
     *_se << endl << (isWarning ? kWarning : kError)
         << NError::MyFormatMessage(systemError)
         << endl;
-    _se->NormalizePrint_UString(fs2us(path));
+    _se->NormalizePrint_UString_Path(fs2us(path));
     *_se << endl << endl;
     _se->Flush();
   }
 }
+
+/*
+void CCallbackConsoleBase::CommonError(const char *message)
+{
+  ClosePercents2();
+  
+  if (_se)
+  {
+    if (_so)
+      _so->Flush();
+
+    *_se << endl << kError << message << endl;
+    _se->Flush();
+  }
+}
+*/
 
 
 HRESULT CCallbackConsoleBase::ScanError_Base(const FString &path, DWORD systemError)
@@ -294,7 +312,7 @@ HRESULT CUpdateCallbackConsole::StartArchive(const wchar_t *name, bool updating)
   {
     *_so << (updating ? kUpdatingArchiveMessage : kCreatingArchiveMessage);
     if (name)
-      _so->NormalizePrint_wstr(name);
+      _so->NormalizePrint_wstr_Path(name);
     else
       *_so << k_StdOut_ArcName;
    *_so << endl << endl;
@@ -315,6 +333,12 @@ HRESULT CUpdateCallbackConsole::FinishArchive(const CFinishArchiveStat &st)
     s += "Archive size: ";
     PrintSize_bytes_Smart(s, st.OutArcFileSize);
     s.Add_LF();
+    if (st.IsMultiVolMode)
+    {
+      s += "Volumes: ";
+      s.Add_UInt32(st.NumVolumes);
+      s.Add_LF();
+    }
     *_so << endl;
     *_so << s;
     // *_so << endl;
@@ -337,6 +361,119 @@ HRESULT CUpdateCallbackConsole::WriteSfx(const wchar_t *name, UInt64 size)
 }
 
 
+
+HRESULT CUpdateCallbackConsole::MoveArc_UpdateStatus()
+{
+  if (NeedPercents())
+  {
+    AString &s = _percent.Command;
+    s = " : ";
+    s.Add_UInt64(_arcMoving_percents);
+    s.Add_Char('%');
+    const bool totalDefined = (_arcMoving_total != 0 && _arcMoving_total != (UInt64)(Int64)-1);
+    if (_arcMoving_current != 0 || totalDefined)
+    {
+      s += " : ";
+      s.Add_UInt64(_arcMoving_current >> 20);
+      s += " MiB";
+    }
+    if (totalDefined)
+    {
+      s += " / ";
+      s.Add_UInt64((_arcMoving_total + ((1 << 20) - 1)) >> 20);
+      s += " MiB";
+    }
+    s += " : temporary archive moving ...";
+    _percent.Print();
+  }
+
+  // we ignore single Ctrl-C, if (_arcMoving_updateMode) mode
+  // because we want to get good final archive instead of temp archive.
+  if (NConsoleClose::g_BreakCounter == 1 && _arcMoving_updateMode)
+    return S_OK;
+  return CheckBreak();
+}
+
+
+HRESULT CUpdateCallbackConsole::MoveArc_Start(
+    const wchar_t *srcTempPath, const wchar_t *destFinalPath,
+    UInt64 size, Int32 updateMode)
+{
+#if 0 // 1 : for debug
+  if (LogLevel > 0 && _so)
+  {
+    ClosePercents_for_so();
+    *_so << "Temporary archive moving:" << endl;
+    _tempU = srcTempPath;
+    _so->Normalize_UString_Path(_tempU);
+    _so->PrintUString(_tempU, _tempA);
+    *_so << endl;
+    _tempU = destFinalPath;
+    _so->Normalize_UString_Path(_tempU);
+    _so->PrintUString(_tempU, _tempA);
+    *_so << endl;
+  }
+#else
+  UNUSED_VAR(srcTempPath)
+  UNUSED_VAR(destFinalPath)
+#endif
+
+  _arcMoving_updateMode = updateMode;
+  _arcMoving_total = size;
+  _arcMoving_current = 0;
+  _arcMoving_percents = 0;
+  return MoveArc_UpdateStatus();
+}
+
+
+HRESULT CUpdateCallbackConsole::MoveArc_Progress(UInt64 totalSize, UInt64 currentSize)
+{
+#if 0 // 1 : for debug
+  if (_so)
+  {
+    ClosePercents_for_so();
+    *_so << totalSize << " : " << currentSize << endl;
+  }
+#endif
+
+  UInt64 percents = 0;
+  if (totalSize != 0)
+  {
+    if (totalSize < ((UInt64)1 << 57))
+      percents = currentSize * 100 / totalSize;
+    else
+      percents = currentSize / (totalSize / 100);
+  }
+
+#ifdef _WIN32
+  // Sleep(300); // for debug
+#endif
+  // totalSize = (UInt64)(Int64)-1; // for debug
+
+  if (percents == _arcMoving_percents)
+    return CheckBreak();
+  _arcMoving_current = currentSize;
+  _arcMoving_total = totalSize;
+  _arcMoving_percents = percents;
+  return MoveArc_UpdateStatus();
+}
+
+
+HRESULT CUpdateCallbackConsole::MoveArc_Finish()
+{
+  // _arcMoving_percents = 0;
+  if (NeedPercents())
+  {
+    _percent.Command.Empty();
+    _percent.Print();
+  }
+  // it can return delayed user break (E_ABORT) status,
+  // if it ignored single CTRL+C in MoveArc_Progress().
+  return CheckBreak();
+}
+
+
+
 HRESULT CUpdateCallbackConsole::DeletingAfterArchiving(const FString &path, bool /* isDir */)
 {
   if (LogLevel > 0 && _so)
@@ -355,7 +492,7 @@ HRESULT CUpdateCallbackConsole::DeletingAfterArchiving(const FString &path, bool
         _tempA.Add_Space();
         *_so << _tempA;
         _tempU = fs2us(path);
-        _so->Normalize_UString(_tempU);
+        _so->Normalize_UString_Path(_tempU);
         _so->PrintUString(_tempU, _tempA);
         *_so << endl;
         if (NeedFlush)
@@ -492,7 +629,7 @@ HRESULT CCallbackConsoleBase::PrintProgress(const wchar_t *name, bool isDir, con
       _tempU = name;
       if (isDir)
         NWindows::NFile::NName::NormalizeDirPathPrefix(_tempU);
-      _so->Normalize_UString(_tempU);
+      _so->Normalize_UString_Path(_tempU);
     }
     _so->PrintUString(_tempU, _tempA);
     *_so << endl;
@@ -518,6 +655,28 @@ HRESULT CCallbackConsoleBase::PrintProgress(const wchar_t *name, bool isDir, con
   
   return CheckBreak2();
 }
+
+
+/*
+void CCallbackConsoleBase::PrintInfoLine(const UString &s)
+{
+  if (LogLevel < 1000)
+    return;
+
+  MT_LOCK
+
+  const bool show2 = (_so != NULL);
+
+  if (show2)
+  {
+    ClosePercents_for_so();
+    _so->PrintUString(s, _tempA);
+    *_so << endl;
+    if (NeedFlush)
+      _so->Flush();
+  }
+}
+*/
 
 HRESULT CUpdateCallbackConsole::GetStream(const wchar_t *name, bool isDir, bool isAnti, UInt32 mode)
 {
@@ -562,10 +721,19 @@ HRESULT CUpdateCallbackConsole::ReadingFileError(const FString &path, DWORD syst
   return ReadingFileError_Base(path, systemError);
 }
 
-HRESULT CUpdateCallbackConsole::SetOperationResult(Int32)
+HRESULT CUpdateCallbackConsole::SetOperationResult(Int32 /* opRes */)
 {
   MT_LOCK
   _percent.Files++;
+  /*
+  if (opRes != NArchive::NUpdate::NOperationResult::kOK)
+  {
+    if (opRes == NArchive::NUpdate::NOperationResult::kError_FileChanged)
+    {
+      CommonError("Input file changed");
+    }
+  }
+  */
   return S_OK;
 }
 
@@ -587,7 +755,7 @@ HRESULT CUpdateCallbackConsole::ReportExtractResult(Int32 opRes, Int32 isEncrypt
       AString s;
       SetExtractErrorMessage(opRes, isEncrypted, s);
       *_se << s << " : " << endl;
-      _se->NormalizePrint_wstr(name);
+      _se->NormalizePrint_wstr_Path(name);
       *_se << endl << endl;
       _se->Flush();
     }
@@ -616,6 +784,8 @@ HRESULT CUpdateCallbackConsole::ReportUpdateOperation(UInt32 op, const wchar_t *
     case NUpdateNotifyOp::kSkip:      s = "."; requiredLevel = 2; break;
     case NUpdateNotifyOp::kDelete:    s = "D"; requiredLevel = 3; break;
     case NUpdateNotifyOp::kHeader:    s = "Header creation"; requiredLevel = 100; break;
+    case NUpdateNotifyOp::kInFileChanged: s = "Size of input file was changed:"; requiredLevel = 10; break;
+    // case NUpdateNotifyOp::kOpFinished:  s = "Finished"; requiredLevel = 100; break;
     default:
     {
       temp[0] = 'o';
@@ -630,12 +800,12 @@ HRESULT CUpdateCallbackConsole::ReportUpdateOperation(UInt32 op, const wchar_t *
 
 /*
 HRESULT CUpdateCallbackConsole::SetPassword(const UString &
-    #ifndef _NO_CRYPTO
+    #ifndef Z7_NO_CRYPTO
     password
     #endif
     )
 {
-  #ifndef _NO_CRYPTO
+  #ifndef Z7_NO_CRYPTO
   PasswordIsDefined = true;
   Password = password;
   #endif
@@ -649,7 +819,7 @@ HRESULT CUpdateCallbackConsole::CryptoGetTextPassword2(Int32 *passwordIsDefined,
 
   *password = NULL;
 
-  #ifdef _NO_CRYPTO
+  #ifdef Z7_NO_CRYPTO
 
   *passwordIsDefined = false;
   return S_OK;
@@ -660,7 +830,7 @@ HRESULT CUpdateCallbackConsole::CryptoGetTextPassword2(Int32 *passwordIsDefined,
   {
     if (AskPassword)
     {
-      RINOK(GetPassword_HRESULT(_so, Password));
+      RINOK(GetPassword_HRESULT(_so, Password))
       PasswordIsDefined = true;
     }
   }
@@ -678,7 +848,7 @@ HRESULT CUpdateCallbackConsole::CryptoGetTextPassword(BSTR *password)
   
   *password = NULL;
 
-  #ifdef _NO_CRYPTO
+  #ifdef Z7_NO_CRYPTO
 
   return E_NOTIMPL;
   
@@ -710,3 +880,119 @@ HRESULT CUpdateCallbackConsole::ShowDeleteFile(const wchar_t *name, bool isDir)
   }
   return S_OK;
 }
+
+/*
+void GetPropName(PROPID propID, const wchar_t *name, AString &nameA, UString &nameU);
+
+static void GetPropName(PROPID propID, UString &nameU)
+{
+  AString nameA;
+  GetPropName(propID, NULL, nameA, nameU);
+  // if (!nameA.IsEmpty())
+    nameU = nameA;
+}
+
+
+static void AddPropNamePrefix(UString &s, PROPID propID)
+{
+  UString name;
+  GetPropName(propID, name);
+  s += name;
+  s += " = ";
+}
+
+void CCallbackConsoleBase::PrintPropInfo(UString &s, PROPID propID, const PROPVARIANT *value)
+{
+  AddPropNamePrefix(s, propID);
+  {
+    UString dest;
+    const int level = 9; // we show up to ns precision level
+    ConvertPropertyToString2(dest, *value, propID, level);
+    s += dest;
+  }
+  PrintInfoLine(s);
+}
+
+static void Add_IndexType_Index(UString &s, UInt32 indexType, UInt32 index)
+{
+  if (indexType == NArchive::NEventIndexType::kArcProp)
+  {
+  }
+  else
+  {
+    if (indexType == NArchive::NEventIndexType::kBlockIndex)
+    {
+      s += "#";
+    }
+    else if (indexType == NArchive::NEventIndexType::kOutArcIndex)
+    {
+    }
+    else
+    {
+      s += "indexType_";
+      s.Add_UInt32(indexType);
+      s.Add_Space();
+    }
+    s.Add_UInt32(index);
+  }
+  s += ": ";
+}
+
+HRESULT CUpdateCallbackConsole::ReportProp(UInt32 indexType, UInt32 index, PROPID propID, const PROPVARIANT *value)
+{
+  UString s;
+  Add_IndexType_Index(s, indexType, index);
+  PrintPropInfo(s, propID, value);
+  return S_OK;
+}
+
+static inline char GetHex(Byte value)
+{
+  return (char)((value < 10) ? ('0' + value) : ('a' + (value - 10)));
+}
+
+static void AddHexToString(UString &dest, const Byte *data, UInt32 size)
+{
+  for (UInt32 i = 0; i < size; i++)
+  {
+    Byte b = data[i];
+    dest += GetHex((Byte)((b >> 4) & 0xF));
+    dest += GetHex((Byte)(b & 0xF));
+  }
+}
+
+void HashHexToString(char *dest, const Byte *data, UInt32 size);
+
+HRESULT CUpdateCallbackConsole::ReportRawProp(UInt32 indexType, UInt32 index,
+    PROPID propID, const void *data, UInt32 dataSize, UInt32 propType)
+{
+  UString s;
+  propType = propType;
+  Add_IndexType_Index(s, indexType, index);
+  AddPropNamePrefix(s, propID);
+  if (propID == kpidChecksum)
+  {
+    char temp[k_HashCalc_DigestSize_Max + 8];
+    HashHexToString(temp, (const Byte *)data, dataSize);
+    s += temp;
+  }
+  else
+    AddHexToString(s, (const Byte *)data, dataSize);
+  PrintInfoLine(s);
+  return S_OK;
+}
+
+HRESULT CUpdateCallbackConsole::ReportFinished(UInt32 indexType, UInt32 index, Int32 opRes)
+{
+  UString s;
+  Add_IndexType_Index(s, indexType, index);
+  s += "finished";
+  if (opRes != NArchive::NUpdate::NOperationResult::kOK)
+  {
+    s += ": ";
+    s.Add_UInt32(opRes);
+  }
+  PrintInfoLine(s);
+  return S_OK;
+}
+*/

@@ -30,11 +30,12 @@ static const CUInt32PCharPair g_ExtraTypes[] =
 {
   { NExtraID::kZip64, "Zip64" },
   { NExtraID::kNTFS, "NTFS" },
+  { NExtraID::kUnix0, "UNIX" },
   { NExtraID::kStrongEncrypt, "StrongCrypto" },
   { NExtraID::kUnixTime, "UT" },
-  { NExtraID::kUnixExtra, "UX" },
-  { NExtraID::kUnix2Extra, "Ux" },
-  { NExtraID::kUnix3Extra, "ux" },
+  { NExtraID::kUnix1, "UX" },
+  { NExtraID::kUnix2, "Ux" },
+  { NExtraID::kUnixN, "ux" },
   { NExtraID::kIzUnicodeComment, "uc" },
   { NExtraID::kIzUnicodeName, "up" },
   { NExtraID::kIzNtSecurityDescriptor, "SD" },
@@ -44,12 +45,29 @@ static const CUInt32PCharPair g_ExtraTypes[] =
 
 void CExtraSubBlock::PrintInfo(AString &s) const
 {
-  for (unsigned i = 0; i < ARRAY_SIZE(g_ExtraTypes); i++)
+  for (unsigned i = 0; i < Z7_ARRAY_SIZE(g_ExtraTypes); i++)
   {
     const CUInt32PCharPair &pair = g_ExtraTypes[i];
     if (pair.Value == ID)
     {
       s += pair.Name;
+      if (ID == NExtraID::kUnixTime)
+      {
+        if (Data.Size() >= 1)
+        {
+          s.Add_Colon();
+          const Byte flags = Data[0];
+          if (flags & 1) s.Add_Char('M');
+          if (flags & 2) s.Add_Char('A');
+          if (flags & 4) s.Add_Char('C');
+          const UInt32 size = (UInt32)(Data.Size()) - 1;
+          if (size % 4 == 0)
+          {
+            s.Add_Colon();
+            s.Add_UInt32(size / 4);
+          }
+        }
+      }
       /*
       if (ID == NExtraID::kApkAlign && Data.Size() >= 2)
       {
@@ -70,7 +88,7 @@ void CExtraSubBlock::PrintInfo(AString &s) const
     }
   }
   {
-    char sz[32];
+    char sz[16];
     sz[0] = '0';
     sz[1] = 'x';
     ConvertUInt32ToHex(ID, sz + 2);
@@ -133,14 +151,22 @@ bool CExtraSubBlock::ExtractNtfsTime(unsigned index, FILETIME &ft) const
   return false;
 }
 
-bool CExtraSubBlock::ExtractUnixTime(bool isCentral, unsigned index, UInt32 &res) const
+bool CExtraSubBlock::Extract_UnixTime(bool isCentral, unsigned index, UInt32 &res) const
 {
+  /* Info-Zip :
+     The central-header extra field contains the modification
+     time only, or no timestamp at all.
+     Size of Data is used to flag its presence or absence
+     If "Flags" indicates that Modtime is present in the local header
+     field, it MUST be present in the central header field, too
+  */
+
   res = 0;
   UInt32 size = (UInt32)Data.Size();
   if (ID != NExtraID::kUnixTime || size < 5)
     return false;
   const Byte *p = (const Byte *)Data;
-  Byte flags = *p++;
+  const Byte flags = *p++;
   size--;
   if (isCentral)
   {
@@ -168,18 +194,35 @@ bool CExtraSubBlock::ExtractUnixTime(bool isCentral, unsigned index, UInt32 &res
 }
 
 
-bool CExtraSubBlock::ExtractUnixExtraTime(unsigned index, UInt32 &res) const
+// Info-ZIP's abandoned "Unix1 timestamps & owner ID info"
+
+bool CExtraSubBlock::Extract_Unix01_Time(unsigned index, UInt32 &res) const
 {
   res = 0;
-  const size_t size = Data.Size();
-  unsigned offset = index * 4;
-  if (ID != NExtraID::kUnixExtra || size < offset + 4)
+  const unsigned offset = index * 4;
+  if (Data.Size() < offset + 4)
+    return false;
+  if (ID != NExtraID::kUnix0 &&
+      ID != NExtraID::kUnix1)
     return false;
   const Byte *p = (const Byte *)Data + offset;
   res = GetUi32(p);
   return true;
 }
 
+/*
+// PKWARE's Unix "extra" is similar to Info-ZIP's abandoned "Unix1 timestamps"
+bool CExtraSubBlock::Extract_Unix_Time(unsigned index, UInt32 &res) const
+{
+  res = 0;
+  const unsigned offset = index * 4;
+  if (ID != NExtraID::kUnix0 || Data.Size() < offset)
+    return false;
+  const Byte *p = (const Byte *)Data + offset;
+  res = GetUi32(p);
+  return true;
+}
+*/
 
 bool CExtraBlock::GetNtfsTime(unsigned index, FILETIME &ft) const
 {
@@ -199,7 +242,7 @@ bool CExtraBlock::GetUnixTime(bool isCentral, unsigned index, UInt32 &res) const
     {
       const CExtraSubBlock &sb = SubBlocks[i];
       if (sb.ID == NFileHeader::NExtraID::kUnixTime)
-        return sb.ExtractUnixTime(isCentral, index, res);
+        return sb.Extract_UnixTime(isCentral, index, res);
     }
   }
   
@@ -214,8 +257,9 @@ bool CExtraBlock::GetUnixTime(bool isCentral, unsigned index, UInt32 &res) const
     FOR_VECTOR (i, SubBlocks)
     {
       const CExtraSubBlock &sb = SubBlocks[i];
-      if (sb.ID == NFileHeader::NExtraID::kUnixExtra)
-        return sb.ExtractUnixExtraTime(index, res);
+      if (sb.ID == NFileHeader::NExtraID::kUnix0 ||
+          sb.ID == NFileHeader::NExtraID::kUnix1)
+        return sb.Extract_Unix01_Time(index, res);
     }
   }
   return false;
@@ -247,6 +291,7 @@ bool CItem::IsDir() const
       case NHostOS::kHPFS:
       case NHostOS::kVFAT:
         return true;
+      default: break;
     }
   }
 
@@ -316,6 +361,7 @@ UInt32 CItem::GetWinAttrib() const
         // #endif
       }
       break;
+    default: break;
   }
   if (IsDir()) // test it;
     winAttrib |= FILE_ATTRIBUTE_DIRECTORY;

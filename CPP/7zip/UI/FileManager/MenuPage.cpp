@@ -26,20 +26,23 @@
 using namespace NWindows;
 using namespace NContextMenuFlags;
 
+#ifdef Z7_LANG
 static const UInt32 kLangIDs[] =
 {
   IDX_SYSTEM_INTEGRATE_TO_MENU,
   IDX_SYSTEM_CASCADED_MENU,
   IDX_SYSTEM_ICON_IN_MENU,
   IDX_EXTRACT_ELIM_DUP,
+  IDT_SYSTEM_ZONE,
   IDT_SYSTEM_CONTEXT_MENU_ITEMS
 };
+#endif
 
 #define kMenuTopic "fm/options.htm#sevenZip"
 
 struct CContextMenuItem
 {
-  int ControlID;
+  unsigned ControlID;
   UInt32 Flag;
 };
 
@@ -80,13 +83,25 @@ extern bool g_Is_Wow64;
   #define KEY_WOW64_32KEY (0x0200)
 #endif
 
+
+static void LoadLang_Spec(UString &s, UInt32 id, const char *eng)
+{
+  LangString(id, s);
+  if (s.IsEmpty())
+    s = eng;
+  s.RemoveChar(L'&');
+}
+
+
 bool CMenuPage::OnInit()
 {
   _initMode = true;
 
   Clear_MenuChanged();
   
-  LangSetDlgItems(*this, kLangIDs, ARRAY_SIZE(kLangIDs));
+#ifdef Z7_LANG
+  LangSetDlgItems(*this, kLangIDs, Z7_ARRAY_SIZE(kLangIDs));
+#endif
 
   #ifdef UNDER_CE
 
@@ -108,9 +123,9 @@ bool CMenuPage::OnInit()
       bit64.Replace(L"64", L"32");
     #endif
     s.Add_Space();
-    s += '(';
+    s.Add_Char('(');
     s += bit64;
-    s += ')';
+    s.Add_Char(')');
     SetItemText(IDX_SYSTEM_INTEGRATE_TO_MENU_2, s);
   }
 
@@ -176,13 +191,51 @@ bool CMenuPage::OnInit()
   CheckButton(IDX_EXTRACT_ELIM_DUP, ci.ElimDup.Val);
 
   _listView.Attach(GetItem(IDL_SYSTEM_OPTIONS));
+  _zoneCombo.Attach(GetItem(IDC_SYSTEM_ZONE));
+
+  {
+    unsigned wz = ci.WriteZone;
+    if (wz == (UInt32)(Int32)-1)
+      wz = 0;
+    for (unsigned i = 0; i <= 3; i++)
+    {
+      unsigned val = i;
+      UString s;
+      if (i == 3)
+      {
+        if (wz < 3)
+          break;
+        val = wz;
+      }
+      else
+      {
+        #define MY_IDYES  406
+        #define MY_IDNO   407
+        if (i == 0)
+          LoadLang_Spec(s, MY_IDNO, "No");
+        else if (i == 1)
+          LoadLang_Spec(s, MY_IDYES, "Yes");
+        else
+          LangString(IDT_ZONE_FOR_OFFICE, s);
+      }
+      if (s.IsEmpty())
+        s.Add_UInt32(val);
+      if (i == 0)
+        s.Insert(0, L"* ");
+      const int index = (int)_zoneCombo.AddString(s);
+      _zoneCombo.SetItemData(index, (LPARAM)val);
+      if (val == wz)
+        _zoneCombo.SetCurSel(index);
+    }
+  }
+
 
   const UInt32 newFlags = LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT;
   _listView.SetExtendedListViewStyle(newFlags, newFlags);
 
   _listView.InsertColumn(0, L"", 200);
 
-  for (unsigned i = 0; i < ARRAY_SIZE(kMenuItems); i++)
+  for (unsigned i = 0; i < Z7_ARRAY_SIZE(kMenuItems); i++)
   {
     const CContextMenuItem &menuItem = kMenuItems[i];
 
@@ -223,8 +276,8 @@ bool CMenuPage::OnInit()
       }
     }
 
-    int itemIndex = _listView.InsertItem(i, s);
-    _listView.SetCheckState(itemIndex, ((ci.Flags & menuItem.Flag) != 0));
+    const int itemIndex = _listView.InsertItem(i, s);
+    _listView.SetCheckState((unsigned)itemIndex, ((ci.Flags & menuItem.Flag) != 0));
   }
 
   _listView.SetColumnWidthAuto(0);
@@ -254,8 +307,8 @@ LONG CMenuPage::OnApply()
     CShellDll &dll = _dlls[d];
     if (dll.wasChanged && !dll.Path.IsEmpty())
     {
-      bool newVal = IsButtonCheckedBool(dll.ctrl);
-      LONG res = SetContextMenuHandler(newVal, fs2us(dll.Path), dll.wow);
+      const bool newVal = IsButtonCheckedBool(dll.ctrl);
+      const LONG res = SetContextMenuHandler(newVal, fs2us(dll.Path), dll.wow);
       if (res != ERROR_SUCCESS && (dll.prevValue != newVal || newVal))
         ShowMenuErrorMessage(NError::MyFormatMessage(res), *this);
       dll.prevValue = CheckContextMenuHandler(fs2us(dll.Path), dll.wow);
@@ -266,7 +319,11 @@ LONG CMenuPage::OnApply()
 
   #endif
 
-  if (_cascaded_Changed || _menuIcons_Changed || _elimDup_Changed || _flags_Changed)
+  if (_cascaded_Changed
+      || _menuIcons_Changed
+      || _elimDup_Changed
+      || _writeZone_Changed
+      || _flags_Changed)
   {
     CContextMenuInfo ci;
     ci.Cascaded.Val = IsButtonCheckedBool(IDX_SYSTEM_CASCADED_MENU);
@@ -278,9 +335,16 @@ LONG CMenuPage::OnApply()
     ci.ElimDup.Val = IsButtonCheckedBool(IDX_EXTRACT_ELIM_DUP);
     ci.ElimDup.Def = _elimDup_Changed;
 
+    {
+      int zoneIndex = (int)_zoneCombo.GetItemData_of_CurSel();
+      if (zoneIndex <= 0)
+        zoneIndex = -1;
+      ci.WriteZone = (UInt32)(Int32)zoneIndex;
+    }
+
     ci.Flags = 0;
     
-    for (unsigned i = 0; i < ARRAY_SIZE(kMenuItems); i++)
+    for (unsigned i = 0; i < Z7_ARRAY_SIZE(kMenuItems); i++)
       if (_listView.GetCheckState(i))
         ci.Flags |= kMenuItems[i].Flag;
     
@@ -300,7 +364,7 @@ void CMenuPage::OnNotifyHelp()
   ShowHelpWindow(kMenuTopic);
 }
 
-bool CMenuPage::OnButtonClicked(int buttonID, HWND buttonHWND)
+bool CMenuPage::OnButtonClicked(unsigned buttonID, HWND buttonHWND)
 {
   switch (buttonID)
   {
@@ -321,6 +385,7 @@ bool CMenuPage::OnButtonClicked(int buttonID, HWND buttonHWND)
     case IDX_SYSTEM_CASCADED_MENU: _cascaded_Changed = true; break;
     case IDX_SYSTEM_ICON_IN_MENU: _menuIcons_Changed = true; break;
     case IDX_EXTRACT_ELIM_DUP: _elimDup_Changed = true; break;
+    // case IDX_EXTRACT_WRITE_ZONE: _writeZone_Changed = true; break;
       
     default:
       return CPropertyPage::OnButtonClicked(buttonID, buttonHWND);
@@ -329,6 +394,19 @@ bool CMenuPage::OnButtonClicked(int buttonID, HWND buttonHWND)
   Changed();
   return true;
 }
+
+
+bool CMenuPage::OnCommand(unsigned code, unsigned itemID, LPARAM param)
+{
+  if (code == CBN_SELCHANGE && itemID == IDC_SYSTEM_ZONE)
+  {
+    _writeZone_Changed = true;
+    Changed();
+    return true;
+  }
+  return CPropertyPage::OnCommand(code, itemID, param);
+}
+
 
 bool CMenuPage::OnNotify(UINT controlID, LPNMHDR lParam)
 {

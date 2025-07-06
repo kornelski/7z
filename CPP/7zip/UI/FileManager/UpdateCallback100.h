@@ -1,7 +1,7 @@
 // UpdateCallback100.h
 
-#ifndef __UPDATE_CALLBACK100_H
-#define __UPDATE_CALLBACK100_H
+#ifndef ZIP7_INC_UPDATE_CALLBACK100_H
+#define ZIP7_INC_UPDATE_CALLBACK100_H
 
 #include "../../../Common/MyCom.h"
 
@@ -13,9 +13,10 @@
 
 #include "ProgressDialog2.h"
 
-class CUpdateCallback100Imp:
+class CUpdateCallback100Imp Z7_final:
   public IFolderArchiveUpdateCallback,
   public IFolderArchiveUpdateCallback2,
+  public IFolderArchiveUpdateCallback_MoveArc,
   public IFolderScanProgress,
   public ICryptoGetTextPassword2,
   public ICryptoGetTextPassword,
@@ -24,29 +25,25 @@ class CUpdateCallback100Imp:
   public CUpdateCallbackGUI2,
   public CMyUnknownImp
 {
-public:
-
-  // CUpdateCallback100Imp() {}
-
-  MY_UNKNOWN_IMP7(
+  Z7_COM_UNKNOWN_IMP_8(
     IFolderArchiveUpdateCallback,
     IFolderArchiveUpdateCallback2,
+    IFolderArchiveUpdateCallback_MoveArc,
     IFolderScanProgress,
     ICryptoGetTextPassword2,
     ICryptoGetTextPassword,
     IArchiveOpenCallback,
     ICompressProgressInfo)
 
-  INTERFACE_IProgress(;)
-  INTERFACE_IArchiveOpenCallback(;)
-  INTERFACE_IFolderArchiveUpdateCallback(;)
-  INTERFACE_IFolderArchiveUpdateCallback2(;)
-  INTERFACE_IFolderScanProgress(;)
-
-  STDMETHOD(SetRatioInfo)(const UInt64 *inSize, const UInt64 *outSize);
-
-  STDMETHOD(CryptoGetTextPassword)(BSTR *password);
-  STDMETHOD(CryptoGetTextPassword2)(Int32 *passwordIsDefined, BSTR *password);
+  Z7_IFACE_COM7_IMP(IProgress)
+  Z7_IFACE_COM7_IMP(IFolderArchiveUpdateCallback)
+  Z7_IFACE_COM7_IMP(IFolderArchiveUpdateCallback2)
+  Z7_IFACE_COM7_IMP(IFolderArchiveUpdateCallback_MoveArc)
+  Z7_IFACE_COM7_IMP(IFolderScanProgress)
+  Z7_IFACE_COM7_IMP(ICryptoGetTextPassword2)
+  Z7_IFACE_COM7_IMP(ICryptoGetTextPassword)
+  Z7_IFACE_COM7_IMP(IArchiveOpenCallback)
+  Z7_IFACE_COM7_IMP(ICompressProgressInfo)
 };
 
 #endif

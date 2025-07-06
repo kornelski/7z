@@ -62,6 +62,33 @@ static bool Delete_EmptyFolder_And_EmptySubFolders(const FString &path)
   return RemoveDir(path);
 }
 
+
+
+struct C_CopyFileProgress_to_FolderCallback_MoveArc Z7_final:
+  public ICopyFileProgress
+{
+  IFolderArchiveUpdateCallback_MoveArc *Callback;
+  HRESULT CallbackResult;
+
+  virtual DWORD CopyFileProgress(UInt64 total, UInt64 current) Z7_override
+  {
+    HRESULT res = Callback->MoveArc_Progress(total, current);
+    CallbackResult = res;
+    // we can ignore E_ABORT here, because we update archive,
+    // and we want to get correct archive after updating
+    if (res == E_ABORT)
+      res = S_OK;
+    return res == S_OK ? PROGRESS_CONTINUE : PROGRESS_CANCEL;
+  }
+
+  C_CopyFileProgress_to_FolderCallback_MoveArc(
+      IFolderArchiveUpdateCallback_MoveArc *callback) :
+    Callback(callback),
+    CallbackResult(S_OK)
+    {}
+};
+
+
 HRESULT CAgentFolder::CommonUpdateOperation(
     AGENT_OP operation,
     bool moveMode,
@@ -83,7 +110,7 @@ HRESULT CAgentFolder::CommonUpdateOperation(
   try
   {
 
-  RINOK(_agentSpec->SetFolder(this));
+  RINOK(_agentSpec->SetFolder(this))
 
   // ---------- Save FolderItem ----------
 
@@ -95,7 +122,7 @@ HRESULT CAgentFolder::CommonUpdateOperation(
   FStringVector processedPaths;
 
   CWorkDirTempFile tempFile;
-  RINOK(tempFile.CreateTempFile(us2fs(_agentSpec->_archiveFilePath)));
+  RINOK(tempFile.CreateTempFile(us2fs(_agentSpec->_archiveFilePath)))
   {
     CMyComPtr<IOutStream> tailStream;
     const CArc &arc = *_agentSpec->_archiveLink.GetArc();
@@ -106,8 +133,8 @@ HRESULT CAgentFolder::CommonUpdateOperation(
     {
       if (arc.Offset < 0)
         return E_NOTIMPL;
-      RINOK(arc.InStream->Seek(0, STREAM_SEEK_SET, NULL));
-      RINOK(NCompress::CopyStream_ExactSize(arc.InStream, tempFile.OutStream, arc.ArcStreamOffset, NULL));
+      RINOK(arc.InStream->Seek(0, STREAM_SEEK_SET, NULL))
+      RINOK(NCompress::CopyStream_ExactSize(arc.InStream, tempFile.OutStream, arc.ArcStreamOffset, NULL))
       CTailOutStream *tailStreamSpec = new CTailOutStream;
       tailStream = tailStreamSpec;
       tailStreamSpec->Stream = tempFile.OutStream;
@@ -117,7 +144,7 @@ HRESULT CAgentFolder::CommonUpdateOperation(
     
     HRESULT result;
 
-    switch (operation)
+    switch ((int)operation)
     {
       case AGENT_OP_Delete:
         result = _agentSpec->DeleteItems(tailStream, indices, numItems, updateCallback100);
@@ -149,18 +176,61 @@ HRESULT CAgentFolder::CommonUpdateOperation(
         return E_FAIL;
     }
     
-    RINOK(result);
+    RINOK(result)
   }
 
   _agentSpec->KeepModeForNextOpen();
-  _agentSpec->Close();
+  _agent->Close();
   
   // before 9.26: if there was error for MoveToOriginal archive was closed.
   // now: we reopen archive after close
 
   // m_FolderItem = NULL;
+  _items.Clear();
+  _proxyDirIndex = k_Proxy_RootDirIndex;
+
+  CMyComPtr<IFolderArchiveUpdateCallback_MoveArc> updateCallback_MoveArc;
+  if (progress)
+    progress->QueryInterface(IID_IFolderArchiveUpdateCallback_MoveArc, (void **)&updateCallback_MoveArc);
   
-  HRESULT res = tempFile.MoveToOriginal(true);
+  HRESULT res;
+  if (updateCallback_MoveArc)
+  {
+    const FString &tempFilePath = tempFile.Get_TempFilePath();
+    UInt64 totalSize = 0;
+    {
+      NFind::CFileInfo fi;
+      if (fi.Find(tempFilePath))
+        totalSize = fi.Size;
+    }
+    RINOK(updateCallback_MoveArc->MoveArc_Start(
+        fs2us(tempFilePath),
+        fs2us(tempFile.Get_OriginalFilePath()),
+        totalSize,
+        1)) // updateMode
+
+    C_CopyFileProgress_to_FolderCallback_MoveArc prox(updateCallback_MoveArc);
+    res = tempFile.MoveToOriginal(
+        true, // deleteOriginal
+        &prox);
+    if (res == S_OK)
+    {
+      res = updateCallback_MoveArc->MoveArc_Finish();
+      // we don't return after E_ABORT here, because
+      // we want to reopen new archive still.
+    }
+    else if (prox.CallbackResult != S_OK)
+      res = prox.CallbackResult;
+
+    // if updating callback returned E_ABORT,
+    // then openCallback still can return E_ABORT also.
+    // So ReOpen() will return with E_ABORT.
+    // But we want to open archive still.
+    // And Before_ArcReopen() call will clear user break status in that case.
+    RINOK(updateCallback_MoveArc->Before_ArcReopen())
+  }
+  else
+    res = tempFile.MoveToOriginal(true); // deleteOriginal
 
   // RINOK(res);
   if (res == S_OK)
@@ -185,21 +255,21 @@ HRESULT CAgentFolder::CommonUpdateOperation(
     CMyComPtr<IArchiveOpenCallback> openCallback;
     if (updateCallback100)
       updateCallback100->QueryInterface(IID_IArchiveOpenCallback, (void **)&openCallback);
-    RINOK(_agentSpec->ReOpen(openCallback));
+    RINOK(_agent->ReOpen(openCallback))
   }
    
   // CAgent::ReOpen() deletes _proxy and _proxy2
-  _items.Clear();
+  // _items.Clear();
   _proxy = NULL;
   _proxy2 = NULL;
-  _proxyDirIndex = k_Proxy_RootDirIndex;
+  // _proxyDirIndex = k_Proxy_RootDirIndex;
   _isAltStreamFolder = false;
   
   
   // ---------- Restore FolderItem ----------
 
   CMyComPtr<IFolderFolder> archiveFolder;
-  RINOK(_agentSpec->BindToRootFolder(&archiveFolder));
+  RINOK(_agent->BindToRootFolder(&archiveFolder))
 
   // CAgent::BindToRootFolder() changes _proxy and _proxy2
   _proxy = _agentSpec->_proxy;
@@ -209,10 +279,10 @@ HRESULT CAgentFolder::CommonUpdateOperation(
   {
     FOR_VECTOR (i, pathParts)
     {
-      int next = _proxy->FindSubDir(_proxyDirIndex, pathParts[i]);
-      if (next < 0)
+      const int next = _proxy->FindSubDir(_proxyDirIndex, pathParts[i]);
+      if (next == -1)
         break;
-      _proxyDirIndex = next;
+      _proxyDirIndex = (unsigned)next;
     }
   }
   
@@ -224,19 +294,19 @@ HRESULT CAgentFolder::CommonUpdateOperation(
     }
     else FOR_VECTOR (i, pathParts)
     {
-      bool dirOnly = (i + 1 < pathParts.Size() || !isAltStreamFolder);
-      int index = _proxy2->FindItem(_proxyDirIndex, pathParts[i], dirOnly);
-      if (index < 0)
+      const bool dirOnly = (i + 1 < pathParts.Size() || !isAltStreamFolder);
+      const int index = _proxy2->FindItem(_proxyDirIndex, pathParts[i], dirOnly);
+      if (index == -1)
         break;
       
       const CProxyFile2 &file = _proxy2->Files[_proxy2->Dirs[_proxyDirIndex].Items[index]];
   
       if (dirOnly)
-        _proxyDirIndex = file.DirIndex;
+        _proxyDirIndex = (unsigned)file.DirIndex;
       else
       {
-        if (file.AltDirIndex >= 0)
-          _proxyDirIndex = file.AltDirIndex;
+        if (file.AltDirIndex != -1)
+          _proxyDirIndex = (unsigned)file.AltDirIndex;
         break;
       }
     }
@@ -295,7 +365,7 @@ HRESULT CAgentFolder::CommonUpdateOperation(
     {
       UString s2 ("Error: ");
       s2 += s;
-      RINOK(updateCallback100->UpdateErrorMessage(s2));
+      RINOK(updateCallback100->UpdateErrorMessage(s2))
       return E_FAIL;
     }
     throw;
@@ -303,16 +373,15 @@ HRESULT CAgentFolder::CommonUpdateOperation(
 }
 
 
-
-STDMETHODIMP CAgentFolder::CopyFrom(Int32 moveMode,
-    const wchar_t *fromFolderPath, // test it
+Z7_COM7F_IMF(CAgentFolder::CopyFrom(Int32 moveMode,
+    const wchar_t *fromFolderPath, /* test it */
     const wchar_t * const *itemsPaths,
     UInt32 numItems,
-    IProgress *progress)
+    IProgress *progress))
 {
   COM_TRY_BEGIN
   {
-    RINOK(_agentSpec->SetFiles(fromFolderPath, itemsPaths, numItems));
+    RINOK(_agentSpec->SetFiles(fromFolderPath, itemsPaths, numItems))
     return CommonUpdateOperation(AGENT_OP_Uni, (moveMode != 0), NULL,
         &NUpdateArchive::k_ActionSet_Add,
         NULL, 0, progress);
@@ -320,7 +389,7 @@ STDMETHODIMP CAgentFolder::CopyFrom(Int32 moveMode,
   COM_TRY_END
 }
 
-STDMETHODIMP CAgentFolder::CopyFromFile(UInt32 destIndex, const wchar_t *itemPath, IProgress *progress)
+Z7_COM7F_IMF(CAgentFolder::CopyFromFile(UInt32 destIndex, const wchar_t *itemPath, IProgress *progress))
 {
   COM_TRY_BEGIN
   return CommonUpdateOperation(AGENT_OP_CopyFromFile, false, itemPath,
@@ -329,7 +398,7 @@ STDMETHODIMP CAgentFolder::CopyFromFile(UInt32 destIndex, const wchar_t *itemPat
   COM_TRY_END
 }
 
-STDMETHODIMP CAgentFolder::Delete(const UInt32 *indices, UInt32 numItems, IProgress *progress)
+Z7_COM7F_IMF(CAgentFolder::Delete(const UInt32 *indices, UInt32 numItems, IProgress *progress))
 {
   COM_TRY_BEGIN
   return CommonUpdateOperation(AGENT_OP_Delete, false, NULL,
@@ -337,7 +406,7 @@ STDMETHODIMP CAgentFolder::Delete(const UInt32 *indices, UInt32 numItems, IProgr
   COM_TRY_END
 }
 
-STDMETHODIMP CAgentFolder::CreateFolder(const wchar_t *name, IProgress *progress)
+Z7_COM7F_IMF(CAgentFolder::CreateFolder(const wchar_t *name, IProgress *progress))
 {
   COM_TRY_BEGIN
   
@@ -351,7 +420,7 @@ STDMETHODIMP CAgentFolder::CreateFolder(const wchar_t *name, IProgress *progress
   }
   else
   {
-    if (_proxy->FindSubDir(_proxyDirIndex, name) >= 0)
+    if (_proxy->FindSubDir(_proxyDirIndex, name) != -1)
       return ERROR_ALREADY_EXISTS;
   }
   
@@ -359,7 +428,7 @@ STDMETHODIMP CAgentFolder::CreateFolder(const wchar_t *name, IProgress *progress
   COM_TRY_END
 }
 
-STDMETHODIMP CAgentFolder::Rename(UInt32 index, const wchar_t *newName, IProgress *progress)
+Z7_COM7F_IMF(CAgentFolder::Rename(UInt32 index, const wchar_t *newName, IProgress *progress))
 {
   COM_TRY_BEGIN
   return CommonUpdateOperation(AGENT_OP_Rename, false, newName, NULL,
@@ -367,13 +436,13 @@ STDMETHODIMP CAgentFolder::Rename(UInt32 index, const wchar_t *newName, IProgres
   COM_TRY_END
 }
 
-STDMETHODIMP CAgentFolder::CreateFile(const wchar_t * /* name */, IProgress * /* progress */)
+Z7_COM7F_IMF(CAgentFolder::CreateFile(const wchar_t * /* name */, IProgress * /* progress */))
 {
   return E_NOTIMPL;
 }
 
-STDMETHODIMP CAgentFolder::SetProperty(UInt32 index, PROPID propID,
-    const PROPVARIANT *value, IProgress *progress)
+Z7_COM7F_IMF(CAgentFolder::SetProperty(UInt32 index, PROPID propID,
+    const PROPVARIANT *value, IProgress *progress))
 {
   COM_TRY_BEGIN
   if (propID != kpidComment || value->vt != VT_BSTR)

@@ -1,7 +1,7 @@
 // UpdateCallbackFar.h
 
-#ifndef __UPDATE_CALLBACK_FAR_H
-#define __UPDATE_CALLBACK_FAR_H
+#ifndef ZIP7_INC_UPDATE_CALLBACK_FAR_H
+#define ZIP7_INC_UPDATE_CALLBACK_FAR_H
 
 #include "../../../Common/MyCom.h"
 
@@ -11,49 +11,47 @@
 
 #include "ProgressBox.h"
 
-class CUpdateCallback100Imp:
-  public IFolderArchiveUpdateCallback,
-  public IFolderArchiveUpdateCallback2,
-  public IFolderScanProgress,
-  public ICryptoGetTextPassword2,
-  public ICryptoGetTextPassword,
-  public IArchiveOpenCallback,
-  public CMyUnknownImp
-{
+Z7_CLASS_IMP_COM_7(
+  CUpdateCallback100Imp
+  , IFolderArchiveUpdateCallback
+  , IFolderArchiveUpdateCallback2
+  , IFolderArchiveUpdateCallback_MoveArc
+  , IFolderScanProgress
+  , ICryptoGetTextPassword2
+  , ICryptoGetTextPassword
+  , IArchiveOpenCallback
+)
+  Z7_IFACE_COM7_IMP(IProgress)
+
   // CMyComPtr<IInFolderArchive> _archiveHandler;
   CProgressBox *_percent;
-  UInt64 _total;
+  // UInt64 _total;
+
+  HRESULT MoveArc_UpdateStatus();
+
+private:
+  UInt64 _arcMoving_total;
+  UInt64 _arcMoving_current;
+  UInt64 _arcMoving_percents;
+  // Int32  _arcMoving_updateMode;
 
 public:
-
   bool PasswordIsDefined;
   UString Password;
 
-  MY_UNKNOWN_IMP6(
-      IFolderArchiveUpdateCallback,
-      IFolderArchiveUpdateCallback2,
-      IFolderScanProgress,
-      ICryptoGetTextPassword2,
-      ICryptoGetTextPassword,
-      IArchiveOpenCallback
-      )
-
-  INTERFACE_IProgress(;)
-  INTERFACE_IFolderArchiveUpdateCallback(;)
-  INTERFACE_IFolderArchiveUpdateCallback2(;)
-  INTERFACE_IFolderScanProgress(;)
-  INTERFACE_IArchiveOpenCallback(;)
-
-  STDMETHOD(CryptoGetTextPassword)(BSTR *password);
-  STDMETHOD(CryptoGetTextPassword2)(Int32 *passwordIsDefined, BSTR *password);
-
-  CUpdateCallback100Imp(): _total(0) {}
+  CUpdateCallback100Imp()
+    // : _total(0)
+    {}
   void Init(/* IInFolderArchive *archiveHandler, */ CProgressBox *progressBox)
   {
     // _archiveHandler = archiveHandler;
     _percent = progressBox;
     PasswordIsDefined = false;
     Password.Empty();
+    _arcMoving_total = 0;
+    _arcMoving_current = 0;
+    _arcMoving_percents = 0;
+    //  _arcMoving_updateMode = 0;
   }
 };
 

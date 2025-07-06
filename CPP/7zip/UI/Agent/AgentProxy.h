@@ -1,7 +1,7 @@
 // AgentProxy.h
 
-#ifndef __AGENT_PROXY_H
-#define __AGENT_PROXY_H
+#ifndef ZIP7_INC_AGENT_PROXY_H
+#define ZIP7_INC_AGENT_PROXY_H
 
 #include "../Common/OpenArchive.h"
 
@@ -34,11 +34,11 @@ struct CProxyDir
   UInt32 NumSubFiles;
   bool CrcIsDefined;
 
-  CProxyDir(): Name(NULL), NameLen(0), ParentDir(-1) {};
+  CProxyDir(): Name(NULL), NameLen(0), ParentDir(-1) {}
   ~CProxyDir() { delete [](wchar_t *)(void *)Name; }
 
   void Clear();
-  bool IsLeaf() const { return ArcIndex >= 0; }
+  bool IsLeaf() const { return ArcIndex != -1; }
 };
 
 class CProxyArc
@@ -54,9 +54,9 @@ public:
   // returns index in Dirs[], or -1,
   int FindSubDir(unsigned dirIndex, const wchar_t *name) const;
 
-  void GetDirPathParts(int dirIndex, UStringVector &pathParts) const;
+  void GetDirPathParts(unsigned dirIndex, UStringVector &pathParts) const;
   // returns full path of Dirs[dirIndex], including back slash
-  UString GetDirPath_as_Prefix(int dirIndex) const;
+  UString GetDirPath_as_Prefix(unsigned dirIndex) const;
   
   // AddRealIndices DOES ADD also item represented by dirIndex (if it's Leaf)
   void AddRealIndices(unsigned dirIndex, CUIntVector &realIndices) const;
@@ -73,7 +73,7 @@ struct CProxyFile2
 {
   int DirIndex;     // >= 0 for dir. (index in ProxyArchive2->Dirs)
   int AltDirIndex;  // >= 0 if there are alt streams. (index in ProxyArchive2->Dirs)
-  int Parent;          // >= 0 if there is parent. (index in archive and in ProxyArchive2->Files)
+  int Parent;       // >= 0 if there is parent. (index in archive and in ProxyArchive2->Files)
   const wchar_t *Name;
   unsigned NameLen;
   bool NeedDeleteName;
@@ -82,7 +82,7 @@ struct CProxyFile2
   
   int GetDirIndex(bool forAltStreams) const { return forAltStreams ? AltDirIndex : DirIndex; }
 
-  bool IsDir() const { return DirIndex >= 0; }
+  bool IsDir() const { return DirIndex != -1; }
   CProxyFile2():
       DirIndex(-1), AltDirIndex(-1), Parent(-1),
       Name(NULL), NameLen(0),
@@ -109,7 +109,7 @@ struct CProxyDir2
   UInt32 NumSubDirs;
   UInt32 NumSubFiles;
 
-  CProxyDir2(): ArcIndex(-1) {};
+  CProxyDir2(): ArcIndex(-1) {}
   void AddFileSubItem(UInt32 index, const UString &name);
   void Clear();
 };
@@ -130,7 +130,7 @@ public:
 
   bool IsThere_SubDir(unsigned dirIndex, const UString &name) const;
 
-  void GetDirPathParts(int dirIndex, UStringVector &pathParts, bool &isAltStreamDir) const;
+  void GetDirPathParts(unsigned dirIndex, UStringVector &pathParts, bool &isAltStreamDir) const;
   UString GetDirPath_as_Prefix(unsigned dirIndex, bool &isAltStreamDir) const;
   bool IsAltDir(unsigned dirIndex) const;
   
@@ -145,7 +145,7 @@ public:
   {
     const CProxyFile2 &file = Files[arcIndex];
     
-    if (file.Parent < 0)
+    if (file.Parent == -1)
       return file.IsAltStream ?
           k_Proxy2_AltRootDirIndex :
           k_Proxy2_RootDirIndex;

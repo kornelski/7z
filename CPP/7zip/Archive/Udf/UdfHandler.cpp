@@ -26,12 +26,18 @@ static void UdfTimeToFileTime(const CTime &t, NWindows::NCOM::CPropVariant &prop
   if (!NWindows::NTime::GetSecondsSince1601(t.GetYear(), d[4], d[5], d[6], d[7], d[8], numSecs))
     return;
   if (t.IsLocal())
-    numSecs -= (Int64)((Int32)t.GetMinutesOffset() * 60);
-  FILETIME ft;
-  UInt64 v = (((numSecs * 100 + d[9]) * 100 + d[10]) * 100 + d[11]) * 10;
-  ft.dwLowDateTime = (UInt32)v;
-  ft.dwHighDateTime = (UInt32)(v >> 32);
-  prop = ft;
+    numSecs = (UInt64)((Int64)numSecs - (Int64)((Int32)t.GetMinutesOffset() * 60));
+  const UInt32 m0 = d[9];
+  const UInt32 m1 = d[10];
+  const UInt32 m2 = d[11];
+  unsigned numDigits = 0;
+  UInt64 v = numSecs * 10000000;
+  if (m0 < 100 && m1 < 100 && m2 < 100)
+  {
+    v += m0 * 100000 + m1 * 1000 + m2 * 10;
+    numDigits = 6;
+  }
+  prop.SetAsTimeFrom_Ft64_Prec(v, k_PropVar_TimePrec_Base + numDigits);
 }
 
 static const Byte kProps[] =
@@ -41,20 +47,29 @@ static const Byte kProps[] =
   kpidSize,
   kpidPackSize,
   kpidMTime,
-  kpidATime
+  kpidATime,
+  kpidCTime,
+  kpidChangeTime,
+  // kpidUserId,
+  // kpidGroupId,
+  // kpidPosixAttrib,
+  kpidLinks
 };
 
 static const Byte kArcProps[] =
 {
-  kpidComment,
+  kpidUnpackVer,
   kpidClusterSize,
-  kpidCTime
+  kpidSectorSize,
+  kpidCTime,
+  kpidMTime,
+  kpidComment
 };
 
 IMP_IInArchive_Props
 IMP_IInArchive_ArcProps
 
-STDMETHODIMP CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value)
+Z7_COM7F_IMF(CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value))
 {
   COM_TRY_BEGIN
   NWindows::NCOM::CPropVariant prop;
@@ -62,6 +77,18 @@ STDMETHODIMP CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value)
   {
     case kpidPhySize: prop = _archive.PhySize; break;
 
+    case kpidUnpackVer:
+    {
+      if (_archive.LogVols.Size() == 1)
+      {
+        UString s;
+        const CLogVol &vol = _archive.LogVols[0];
+        vol.DomainId.AddUdfVersionTo(s);
+        if (!s.IsEmpty())
+          prop = s;
+      }
+      break;
+    }
     case kpidComment:
     {
       UString comment = _archive.GetComment();
@@ -83,12 +110,21 @@ STDMETHODIMP CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value)
       }
       break;
 
+    case kpidSectorSize: prop = ((UInt32)1 << _archive.SecLogSize); break;
+
     case kpidCTime:
       if (_archive.LogVols.Size() == 1)
       {
         const CLogVol &vol = _archive.LogVols[0];
         if (vol.FileSets.Size() >= 1)
-          UdfTimeToFileTime(vol.FileSets[0].RecodringTime, prop);
+          UdfTimeToFileTime(vol.FileSets[0].RecordingTime, prop);
+      }
+      break;
+    case kpidMTime:
+      if (_archive.PrimeVols.Size() == 1)
+      {
+        const CPrimeVol &pv = _archive.PrimeVols[0];
+        UdfTimeToFileTime(pv.RecordingTime, prop);
       }
       break;
 
@@ -108,15 +144,15 @@ STDMETHODIMP CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value)
   COM_TRY_END
 }
 
-class CProgressImp: public CProgressVirt
+class CProgressImp Z7_final: public CProgressVirt
 {
   CMyComPtr<IArchiveOpenCallback> _callback;
   UInt64 _numFiles;
   UInt64 _numBytes;
 public:
-  HRESULT SetTotal(UInt64 numBytes);
-  HRESULT SetCompleted(UInt64 numFiles, UInt64 numBytes);
-  HRESULT SetCompleted();
+  HRESULT SetTotal(UInt64 numBytes) Z7_override;
+  HRESULT SetCompleted(UInt64 numFiles, UInt64 numBytes) Z7_override;
+  HRESULT SetCompleted() Z7_override;
   CProgressImp(IArchiveOpenCallback *callback): _callback(callback), _numFiles(0), _numBytes(0) {}
 };
 
@@ -141,18 +177,19 @@ HRESULT CProgressImp::SetCompleted()
   return S_OK;
 }
 
-STDMETHODIMP CHandler::Open(IInStream *stream, const UInt64 *, IArchiveOpenCallback *callback)
+Z7_COM7F_IMF(CHandler::Open(IInStream *stream, const UInt64 *, IArchiveOpenCallback *callback))
 {
   COM_TRY_BEGIN
   {
     Close();
     CProgressImp progressImp(callback);
-    RINOK(_archive.Open(stream, &progressImp));
+    RINOK(_archive.Open(stream, &progressImp))
     bool showVolName = (_archive.LogVols.Size() > 1);
     FOR_VECTOR (volIndex, _archive.LogVols)
     {
       const CLogVol &vol = _archive.LogVols[volIndex];
       bool showFileSetName = (vol.FileSets.Size() > 1);
+      // showFileSetName = true; // for debug
       FOR_VECTOR (fsIndex, vol.FileSets)
       {
         const CFileSet &fs = vol.FileSets[fsIndex];
@@ -172,7 +209,7 @@ STDMETHODIMP CHandler::Open(IInStream *stream, const UInt64 *, IArchiveOpenCallb
   COM_TRY_END
 }
 
-STDMETHODIMP CHandler::Close()
+Z7_COM7F_IMF(CHandler::Close())
 {
   _inStream.Release();
   _archive.Clear();
@@ -180,13 +217,13 @@ STDMETHODIMP CHandler::Close()
   return S_OK;
 }
 
-STDMETHODIMP CHandler::GetNumberOfItems(UInt32 *numItems)
+Z7_COM7F_IMF(CHandler::GetNumberOfItems(UInt32 *numItems))
 {
   *numItems = _refs2.Size();
   return S_OK;
 }
 
-STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *value)
+Z7_COM7F_IMF(CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *value))
 {
   COM_TRY_BEGIN
   NWindows::NCOM::CPropVariant prop;
@@ -205,6 +242,15 @@ STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *val
       case kpidPackSize:  if (!item.IsDir()) prop = (UInt64)item.NumLogBlockRecorded * vol.BlockSize; break;
       case kpidMTime:  UdfTimeToFileTime(item.MTime, prop); break;
       case kpidATime:  UdfTimeToFileTime(item.ATime, prop); break;
+      case kpidCTime:
+        if (item.IsExtended)
+            UdfTimeToFileTime(item.CreateTime, prop);
+        break;
+      case kpidChangeTime:  UdfTimeToFileTime(item.AttribTime, prop); break;
+      // case kpidUserId: prop = item.Uid; break;
+      // case kpidGroupId: prop = item.Gid; break;
+      // case kpidPosixAttrib: prop = (UInt32)item.Permissions; break;
+      case kpidLinks: prop = (UInt32)item.FileLinkCount; break;
     }
   }
   prop.Detach(value);
@@ -212,9 +258,9 @@ STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *val
   COM_TRY_END
 }
 
-STDMETHODIMP CHandler::GetStream(UInt32 index, ISequentialInStream **stream)
+Z7_COM7F_IMF(CHandler::GetStream(UInt32 index, ISequentialInStream **stream))
 {
-  *stream = 0;
+  *stream = NULL;
 
   const CRef2 &ref2 = _refs2[index];
   const CLogVol &vol = _archive.LogVols[ref2.Vol];
@@ -247,7 +293,7 @@ STDMETHODIMP CHandler::GetStream(UInt32 index, ISequentialInStream **stream)
     if (size < len)
       return S_FALSE;
       
-    int partitionIndex = vol.PartitionMaps[extent.PartitionRef].PartitionIndex;
+    const unsigned partitionIndex = vol.PartitionMaps[extent.PartitionRef].PartitionIndex;
     UInt32 logBlockNumber = extent.Pos;
     const CPartition &partition = _archive.Partitions[partitionIndex];
     UInt64 offset = ((UInt64)partition.Pos << _archive.SecLogSize) +
@@ -272,11 +318,11 @@ STDMETHODIMP CHandler::GetStream(UInt32 index, ISequentialInStream **stream)
   return S_OK;
 }
 
-STDMETHODIMP CHandler::Extract(const UInt32 *indices, UInt32 numItems,
-    Int32 testMode, IArchiveExtractCallback *extractCallback)
+Z7_COM7F_IMF(CHandler::Extract(const UInt32 *indices, UInt32 numItems,
+    Int32 testMode, IArchiveExtractCallback *extractCallback))
 {
   COM_TRY_BEGIN
-  bool allFilesMode = (numItems == (UInt32)(Int32)-1);
+  const bool allFilesMode = (numItems == (UInt32)(Int32)-1);
   if (allFilesMode)
     numItems = _refs2.Size();
   if (numItems == 0)
@@ -286,7 +332,7 @@ STDMETHODIMP CHandler::Extract(const UInt32 *indices, UInt32 numItems,
 
   for (i = 0; i < numItems; i++)
   {
-    UInt32 index = (allFilesMode ? i : indices[i]);
+    const UInt32 index = (allFilesMode ? i : indices[i]);
     const CRef2 &ref2 = _refs2[index];
     const CRef &ref = _archive.LogVols[ref2.Vol].FileSets[ref2.Fs].Refs[ref2.Ref];
     const CFile &file = _archive.Files[ref.FileIndex];
@@ -294,31 +340,28 @@ STDMETHODIMP CHandler::Extract(const UInt32 *indices, UInt32 numItems,
     if (!item.IsDir())
       totalSize += item.Size;
   }
-  extractCallback->SetTotal(totalSize);
+  RINOK(extractCallback->SetTotal(totalSize))
 
   UInt64 currentTotalSize = 0;
   
-  NCompress::CCopyCoder *copyCoderSpec = new NCompress::CCopyCoder();
-  CMyComPtr<ICompressCoder> copyCoder = copyCoderSpec;
-
-  CLocalProgress *lps = new CLocalProgress;
-  CMyComPtr<ICompressProgressInfo> progress = lps;
+  CMyComPtr2_Create<ICompressProgressInfo, CLocalProgress> lps;
   lps->Init(extractCallback, false);
+  CMyComPtr2_Create<ICompressCoder, NCompress::CCopyCoder> copyCoder;
+  CMyComPtr2_Create<ISequentialOutStream, CLimitedSequentialOutStream> outStream;
 
-  CLimitedSequentialOutStream *outStreamSpec = new CLimitedSequentialOutStream;
-  CMyComPtr<ISequentialOutStream> outStream(outStreamSpec);
-
-  for (i = 0; i < numItems; i++)
+  for (i = 0;; i++)
   {
     lps->InSize = lps->OutSize = currentTotalSize;
-    RINOK(lps->SetCur());
+    RINOK(lps->SetCur())
+    if (i >= numItems)
+      break;
     CMyComPtr<ISequentialOutStream> realOutStream;
-    Int32 askMode = testMode ?
+    const Int32 askMode = testMode ?
         NExtract::NAskMode::kTest :
         NExtract::NAskMode::kExtract;
-    UInt32 index = allFilesMode ? i : indices[i];
+    const UInt32 index = allFilesMode ? i : indices[i];
     
-    RINOK(extractCallback->GetStream(index, &realOutStream, askMode));
+    RINOK(extractCallback->GetStream(index, &realOutStream, askMode))
 
     const CRef2 &ref2 = _refs2[index];
     const CRef &ref = _archive.LogVols[ref2.Vol].FileSets[ref2.Fs].Refs[ref2.Ref];
@@ -327,8 +370,8 @@ STDMETHODIMP CHandler::Extract(const UInt32 *indices, UInt32 numItems,
 
     if (item.IsDir())
     {
-      RINOK(extractCallback->PrepareOperation(askMode));
-      RINOK(extractCallback->SetOperationResult(NExtract::NOperationResult::kOK));
+      RINOK(extractCallback->PrepareOperation(askMode))
+      RINOK(extractCallback->SetOperationResult(NExtract::NOperationResult::kOK))
       continue;
     }
     currentTotalSize += item.Size;
@@ -336,26 +379,28 @@ STDMETHODIMP CHandler::Extract(const UInt32 *indices, UInt32 numItems,
     if (!testMode && !realOutStream)
       continue;
 
-    RINOK(extractCallback->PrepareOperation(askMode));
-    outStreamSpec->SetStream(realOutStream);
+    RINOK(extractCallback->PrepareOperation(askMode))
+    outStream->SetStream(realOutStream);
     realOutStream.Release();
-    outStreamSpec->Init(item.Size);
+    outStream->Init(item.Size);
     Int32 opRes;
-    CMyComPtr<ISequentialInStream> udfInStream;
-    HRESULT res = GetStream(index, &udfInStream);
-    if (res == E_NOTIMPL)
-      opRes = NExtract::NOperationResult::kUnsupportedMethod;
-    else if (res != S_OK)
-      opRes = NExtract::NOperationResult::kDataError;
-    else
     {
-      RINOK(copyCoder->Code(udfInStream, outStream, NULL, NULL, progress));
-      opRes = outStreamSpec->IsFinishedOK() ?
-        NExtract::NOperationResult::kOK:
-        NExtract::NOperationResult::kDataError;
+      CMyComPtr<ISequentialInStream> udfInStream;
+      const HRESULT res = GetStream(index, &udfInStream);
+      if (res == E_NOTIMPL)
+        opRes = NExtract::NOperationResult::kUnsupportedMethod;
+      else if (res != S_OK)
+        opRes = NExtract::NOperationResult::kDataError;
+      else
+      {
+        RINOK(copyCoder.Interface()->Code(udfInStream, outStream, NULL, NULL, lps))
+        opRes = outStream->IsFinishedOK() ?
+            NExtract::NOperationResult::kOK:
+            NExtract::NOperationResult::kDataError;
+      }
     }
-    outStreamSpec->ReleaseStream();
-    RINOK(extractCallback->SetOperationResult(opRes));
+    outStream->ReleaseStream();
+    RINOK(extractCallback->SetOperationResult(opRes))
   }
   return S_OK;
   COM_TRY_END
@@ -364,12 +409,18 @@ STDMETHODIMP CHandler::Extract(const UInt32 *indices, UInt32 numItems,
 static const UInt32 kIsoStartPos = 0x8000;
 
 //  5, { 0, 'N', 'S', 'R', '0' },
-static const Byte k_Signature[] = { 1, 'C', 'D', '0', '0', '1' };
+
+static const Byte k_Signature[] =
+{
+  8,    0, 'B', 'E', 'A', '0', '1', 1, 0,
+  6,    1, 'C', 'D', '0', '0', '1'
+};
 
 REGISTER_ARC_I(
-  "Udf", "udf iso img", 0, 0xE0,
+  "Udf", "udf iso img", NULL, 0xE0,
   k_Signature,
   kIsoStartPos,
+  NArcInfoFlags::kMultiSignature |
   NArcInfoFlags::kStartOpen,
   IsArc_Udf)
 

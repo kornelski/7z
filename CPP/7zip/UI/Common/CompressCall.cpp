@@ -51,7 +51,7 @@ UString GetQuotedString(const UString &s)
 {
   UString s2 ('\"');
   s2 += s;
-  s2 += '\"';
+  s2.Add_Char('\"');
   return s2;
 }
 
@@ -83,7 +83,7 @@ static HRESULT Call7zGui(const UString &params,
   const WRes wres = process.Create(imageName, params, NULL); // curDir);
   if (wres != 0)
   {
-    HRESULT hres = HRESULT_FROM_WIN32(wres);
+    const HRESULT hres = HRESULT_FROM_WIN32(wres);
     ErrorMessageHRESULT(hres, imageName);
     return hres;
   }
@@ -92,7 +92,7 @@ static HRESULT Call7zGui(const UString &params,
   else if (event != NULL)
   {
     HANDLE handles[] = { process, *event };
-    ::WaitForMultipleObjects(ARRAY_SIZE(handles), handles, FALSE, INFINITE);
+    ::WaitForMultipleObjects(Z7_ARRAY_SIZE(handles), handles, FALSE, INFINITE);
   }
   return S_OK;
 }
@@ -155,14 +155,14 @@ static HRESULT CreateMap(const UStringVector &names,
     event.Close();
   }
 
-  params += '#';
+  params.Add_Char('#');
   params += mappingName;
-  params += ':';
+  params.Add_Colon();
   char temp[32];
   ConvertUInt64ToString(totalSize, temp);
   params += temp;
   
-  params += ':';
+  params.Add_Colon();
   params += eventName;
 
   LPVOID data = fileMapping.Map(FILE_MAP_WRITE, 0, totalSize);
@@ -175,7 +175,7 @@ static HRESULT CreateMap(const UStringVector &names,
     FOR_VECTOR (i, names)
     {
       const UString &s = names[i];
-      unsigned len = s.Len() + 1;
+      const unsigned len = s.Len() + 1;
       wmemcpy(cur, (const wchar_t *)s, len);
       cur += len;
     }
@@ -197,7 +197,7 @@ HRESULT CompressFiles(
   CFileMapping fileMapping;
   NSynchronization::CManualResetEvent event;
   params += kIncludeSwitch;
-  RINOK(CreateMap(names, fileMapping, event, params));
+  RINOK(CreateMap(names, fileMapping, event, params))
 
   if (!arcType.IsEmpty())
   {
@@ -252,7 +252,7 @@ static void ExtractGroupCommand(const UStringVector &arcPaths, UString &params, 
     ErrorMessageHRESULT(result);
 }
 
-void ExtractArchives(const UStringVector &arcPaths, const UString &outFolder, bool showDialog, bool elimDup)
+void ExtractArchives(const UStringVector &arcPaths, const UString &outFolder, bool showDialog, bool elimDup, UInt32 writeZone)
 {
   MY_TRY_BEGIN
   UString params ('x');
@@ -263,6 +263,11 @@ void ExtractArchives(const UStringVector &arcPaths, const UString &outFolder, bo
   }
   if (elimDup)
     params += " -spe";
+  if (writeZone != (UInt32)(Int32)-1)
+  {
+    params += " -snz";
+    params.Add_UInt32(writeZone);
+  }
   if (showDialog)
     params += kShowDialogSwitch;
   ExtractGroupCommand(arcPaths, params, false);
@@ -331,7 +336,7 @@ void Benchmark(bool totalMode)
   if (totalMode)
     params += " -mm=*";
   AddLagePagesSwitch(params);
-  HRESULT result = Call7zGui(params, false, NULL);
+  const HRESULT result = Call7zGui(params, false, NULL);
   if (result != S_OK)
     ErrorMessageHRESULT(result);
   MY_TRY_FINISH_VOID

@@ -1,7 +1,7 @@
 // BitlEncoder.h -- the Least Significant Bit of byte is First
 
-#ifndef __BITL_ENCODER_H
-#define __BITL_ENCODER_H
+#ifndef ZIP7_INC_BITL_ENCODER_H
+#define ZIP7_INC_BITL_ENCODER_H
 
 #include "../Common/OutBuffer.h"
 
@@ -33,6 +33,7 @@ public:
     _bitPos = 8;
     _curByte = 0;
   }
+  Z7_FORCE_INLINE
   void WriteBits(UInt32 value, unsigned numBits)
   {
     while (numBits > 0)

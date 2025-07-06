@@ -2,6 +2,8 @@
 
 #include "StdAfx.h"
 
+#ifndef Z7_EXTERNAL_CODECS
+
 #include "../../../Common/MyException.h"
 
 #include "../../UI/Common/EnumDirItems.h"
@@ -33,7 +35,7 @@ static void ThrowException_if_Error(HRESULT res)
     throw CSystemException(res);
 }
 
-#ifdef EXTERNAL_CODECS
+#ifdef Z7_EXTERNAL_CODECS
 
 #define CREATE_CODECS \
   CCodecs *codecs = new CCodecs; \
@@ -42,10 +44,10 @@ static void ThrowException_if_Error(HRESULT res)
   Codecs_AddHashArcHandler(codecs);
 
 #define LOAD_EXTERNAL_CODECS \
-    CExternalCodecs __externalCodecs; \
-    __externalCodecs.GetCodecs = codecs; \
-    __externalCodecs.GetHashers = codecs; \
-    ThrowException_if_Error(__externalCodecs.Load());
+    CExternalCodecs _externalCodecs; \
+    _externalCodecs.GetCodecs = codecs; \
+    _externalCodecs.GetHashers = codecs; \
+    ThrowException_if_Error(_externalCodecs.Load());
 
 #else
 
@@ -66,7 +68,7 @@ UString GetQuotedString(const UString &s)
 {
   UString s2 ('\"');
   s2 += s;
-  s2 += '\"';
+  s2.Add_Char('\"');
   return s2;
 }
 
@@ -152,18 +154,11 @@ HRESULT CompressFiles(
 
 
 static HRESULT ExtractGroupCommand(const UStringVector &arcPaths,
-    bool showDialog, const UString &outFolder, bool testMode, bool elimDup = false,
-    const char *kType = NULL)
+    bool showDialog, CExtractOptions &eo, const char *kType = NULL)
 {
   MY_TRY_BEGIN
   
   CREATE_CODECS
-
-  CExtractOptions eo;
-  eo.OutputDir = us2fs(outFolder);
-  eo.TestMode = testMode;
-  eo.ElimDup.Val = elimDup;
-  eo.ElimDup.Def = elimDup;
 
   CExtractCallbackImp *ecs = new CExtractCallbackImp;
   CMyComPtr<IFolderArchiveExtractCallback> extractCallback = ecs;
@@ -228,15 +223,26 @@ static HRESULT ExtractGroupCommand(const UStringVector &arcPaths,
   return result;
 }
 
-void ExtractArchives(const UStringVector &arcPaths, const UString &outFolder, bool showDialog, bool elimDup)
+void ExtractArchives(const UStringVector &arcPaths, const UString &outFolder,
+    bool showDialog, bool elimDup, UInt32 writeZone)
 {
-  ExtractGroupCommand(arcPaths, showDialog, outFolder, false, elimDup);
+  CExtractOptions eo;
+  eo.OutputDir = us2fs(outFolder);
+  eo.TestMode = false;
+  eo.ElimDup.Val = elimDup;
+  eo.ElimDup.Def = elimDup;
+  if (writeZone != (UInt32)(Int32)-1)
+    eo.ZoneMode = (NExtract::NZoneIdMode::EEnum)writeZone;
+  ExtractGroupCommand(arcPaths, showDialog, eo);
 }
 
 void TestArchives(const UStringVector &arcPaths, bool hashMode)
 {
-  ExtractGroupCommand(arcPaths, true, UString(), true,
-      false, // elimDup
+  CExtractOptions eo;
+  eo.TestMode = true;
+  ExtractGroupCommand(arcPaths,
+      true, // showDialog
+      eo,
       hashMode ? "hash" : NULL);
 }
 
@@ -317,3 +323,5 @@ void Benchmark(bool totalMode)
   
   MY_TRY_FINISH
 }
+
+#endif

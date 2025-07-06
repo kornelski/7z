@@ -5,36 +5,62 @@
 #include "../../../C/CpuArch.h"
 
 #include "../../Common/ComTry.h"
-#include "../../Common/Defs.h"
 
-#include "../../Windows/PropVariant.h"
+#include "../../Windows/PropVariantUtils.h"
 
 #include "../Common/RegisterArc.h"
 #include "../Common/StreamUtils.h"
 
 #include "HandlerCont.h"
 
-#define Get16(p) GetBe16(p)
-#define Get32(p) GetBe32(p)
+#define Get32(p) GetBe32a(p)
 
 using namespace NWindows;
 
 namespace NArchive {
+
+namespace NDmg {
+  const char *Find_Apple_FS_Ext(const AString &name);
+  bool Is_Apple_FS_Or_Unknown(const AString &name);
+}
+
 namespace NApm {
 
 static const Byte kSig0 = 'E';
 static const Byte kSig1 = 'R';
 
+static const CUInt32PCharPair k_Flags[] =
+{
+  { 0, "VALID" },
+  { 1, "ALLOCATED" },
+  { 2, "IN_USE" },
+  { 3, "BOOTABLE" },
+  { 4, "READABLE" },
+  { 5, "WRITABLE" },
+  { 6, "OS_PIC_CODE" },
+  // { 7, "OS_SPECIFIC_2" }, // "Unused"
+  { 8, "ChainCompatible" }, // "OS_SPECIFIC_1"
+  { 9, "RealDeviceDriver" },
+  // { 10, "CanChainToNext" },
+  { 30, "MOUNTED_AT_STARTUP" },
+  { 31, "STARTUP" }
+};
+
+#define DPME_FLAGS_VALID      (1u << 0)
+#define DPME_FLAGS_ALLOCATED  (1u << 1)
+
+static const unsigned k_Str_Size = 32;
+
 struct CItem
 {
   UInt32 StartBlock;
   UInt32 NumBlocks;
-  char Name[32];
-  char Type[32];
+  UInt32 Flags; // pmPartStatus
+  char Name[k_Str_Size];
+  char Type[k_Str_Size];
   /*
   UInt32 DataStartBlock;
   UInt32 NumDataBlocks;
-  UInt32 Status;
   UInt32 BootStartBlock;
   UInt32 BootSize;
   UInt32 BootAddr;
@@ -43,152 +69,212 @@ struct CItem
   char Processor[16];
   */
 
-  bool Parse(const Byte *p, UInt32 &numBlocksInMap)
+  bool Is_Valid_and_Allocated() const
+    { return (Flags & (DPME_FLAGS_VALID | DPME_FLAGS_ALLOCATED)) != 0; }
+
+  bool Parse(const UInt32 *p32, UInt32 &numBlocksInMap)
   {
-    numBlocksInMap = Get32(p + 4);
-    StartBlock = Get32(p + 8);
-    NumBlocks = Get32(p + 0xC);
-    memcpy(Name, p + 0x10, 32);
-    memcpy(Type, p + 0x30, 32);
-    if (p[0] != 0x50 || p[1] != 0x4D || p[2] != 0 || p[3] != 0)
+    if (GetUi32a(p32) != 0x4d50) // "PM"
       return false;
+    numBlocksInMap = Get32(p32 + 4 / 4);
+    StartBlock = Get32(p32 + 8 / 4);
+    NumBlocks = Get32(p32 + 0xc / 4);
+    Flags = Get32(p32 + 0x58 / 4);
+    memcpy(Name, p32 + 0x10 / 4, k_Str_Size);
+    memcpy(Type, p32 + 0x30 / 4, k_Str_Size);
     /*
     DataStartBlock = Get32(p + 0x50);
     NumDataBlocks = Get32(p + 0x54);
-    Status = Get32(p + 0x58);
-    BootStartBlock = Get32(p + 0x5C);
+    BootStartBlock = Get32(p + 0x5c);
     BootSize = Get32(p + 0x60);
     BootAddr = Get32(p + 0x64);
     if (Get32(p + 0x68) != 0)
       return false;
-    BootEntry = Get32(p + 0x6C);
+    BootEntry = Get32(p + 0x6c);
     if (Get32(p + 0x70) != 0)
       return false;
     BootChecksum = Get32(p + 0x74);
-    memcpy(Processor, p + 0x78, 16);
+    memcpy(Processor, p32 + 0x78 / 4, 16);
     */
     return true;
   }
 };
 
-class CHandler: public CHandlerCont
+
+Z7_class_CHandler_final: public CHandlerCont
 {
+  Z7_IFACE_COM7_IMP(IInArchive_Cont)
+
   CRecordVector<CItem> _items;
   unsigned _blockSizeLog;
-  UInt32 _numBlocks;
-  UInt64 _phySize;
   bool _isArc;
+  // UInt32 _numBlocks;
+  UInt64 _phySize;
 
-  HRESULT ReadTables(IInStream *stream);
   UInt64 BlocksToBytes(UInt32 i) const { return (UInt64)i << _blockSizeLog; }
 
-  virtual int GetItem_ExtractInfo(UInt32 index, UInt64 &pos, UInt64 &size) const
+  virtual int GetItem_ExtractInfo(UInt32 index, UInt64 &pos, UInt64 &size) const Z7_override
   {
     const CItem &item = _items[index];
     pos = BlocksToBytes(item.StartBlock);
     size = BlocksToBytes(item.NumBlocks);
     return NExtract::NOperationResult::kOK;
   }
-
-public:
-  INTERFACE_IInArchive_Cont(;)
 };
 
 static const UInt32 kSectorSize = 512;
+
+// we support only 4 cluster sizes: 512, 1024, 2048, 4096 */
 
 API_FUNC_static_IsArc IsArc_Apm(const Byte *p, size_t size)
 {
   if (size < kSectorSize)
     return k_IsArc_Res_NEED_MORE;
-  if (p[0] != kSig0 || p[1] != kSig1)
+  if (GetUi32(p + 12) != 0)
     return k_IsArc_Res_NO;
-  unsigned i;
-  for (i = 8; i < 16; i++)
-    if (p[i] != 0)
-      return k_IsArc_Res_NO;
-  UInt32 blockSize = Get16(p + 2);
-  for (i = 9; ((UInt32)1 << i) != blockSize; i++)
-    if (i >= 12)
-      return k_IsArc_Res_NO;
-  return k_IsArc_Res_YES;
+  UInt32 v = GetUi32(p); // we read as little-endian
+  v ^= kSig0 | (unsigned)kSig1 << 8;
+  if (v & ~((UInt32)0xf << 17))
+    return k_IsArc_Res_NO;
+  if ((0x116u >> (v >> 17)) & 1)
+    return k_IsArc_Res_YES;
+  return k_IsArc_Res_NO;
 }
 }
 
-HRESULT CHandler::ReadTables(IInStream *stream)
+Z7_COM7F_IMF(CHandler::Open(IInStream *stream, const UInt64 *, IArchiveOpenCallback * /* callback */))
 {
-  Byte buf[kSectorSize];
+  COM_TRY_BEGIN
+  Close();
+
+  UInt32 buf32[kSectorSize / 4];
+  unsigned numPadSectors, blockSizeLog_from_Header;
   {
-    RINOK(ReadStream_FALSE(stream, buf, kSectorSize));
-    if (buf[0] != kSig0 || buf[1] != kSig1)
+    // Driver Descriptor Map (DDM)
+    RINOK(ReadStream_FALSE(stream, buf32, kSectorSize))
+    //  8: UInt16 sbDevType : =0 (usually), =1 in Apple Mac OS X 10.3.0 iso
+    // 10: UInt16 sbDevId   : =0 (usually), =1 in Apple Mac OS X 10.3.0 iso
+    // 12: UInt32 sbData    : =0
+    if (buf32[3] != 0)
       return S_FALSE;
-    UInt32 blockSize = Get16(buf + 2);
-    unsigned i;
-    for (i = 9; ((UInt32)1 << i) != blockSize; i++)
-      if (i >= 12)
-        return S_FALSE;
-    _blockSizeLog = i;
-    _numBlocks = Get32(buf + 4);
-    for (i = 8; i < 16; i++)
-      if (buf[i] != 0)
-        return S_FALSE;
+    UInt32 v = GetUi32a(buf32); // we read as little-endian
+    v ^= kSig0 | (unsigned)kSig1 << 8;
+    if (v & ~((UInt32)0xf << 17))
+      return S_FALSE;
+    v >>= 16;
+    if (v == 0)
+      return S_FALSE;
+    if (v & (v - 1))
+      return S_FALSE;
+    // v == { 16,8,4,2 } : block size (x256 bytes)
+    const unsigned a =
+#if 1
+        (0x30210u >> v) & 3;
+#else
+        0; // for debug : hardcoded switch to 512-bytes mode
+#endif
+    numPadSectors = (1u << a) - 1;
+    _blockSizeLog = blockSizeLog_from_Header = 9 + a;
   }
 
-  unsigned numSkips = (unsigned)1 << (_blockSizeLog - 9);
-  for (unsigned j = 1; j < numSkips; j++)
-  {
-    RINOK(ReadStream_FALSE(stream, buf, kSectorSize));
-  }
+/*
+  some APMs (that are ".iso" macOS installation files) contain
+    (blockSizeLog == 11) in DDM header,
+  and contain 2 overlapping maps:
+    1) map for  512-bytes-step
+    2) map for 2048-bytes-step
+   512-bytes-step map is correct.
+  2048-bytes-step map can be incorrect in some cases.
 
-  UInt32 numBlocksInMap = 0;
+  macos 8 / OSX DP2 iso:
+    There is shared "hfs" item in both maps.
+    And correct (offset/size) values for "hfs" partition
+    can be calculated only in 512-bytes mode (ignoring blockSizeLog == 11).
+    But some records (Macintosh.Apple_Driver*_)
+    can be correct on both modes: 512-bytes mode / 2048-bytes-step.
   
+  macos 921 ppc / Apple Mac OS X 10.3.0 iso:
+    Both maps are correct.
+    If we use 512-bytes-step, each 4th item is (Apple_Void) with zero size.
+    And these zero size (Apple_Void) items will be first items in 2048-bytes-step map.
+*/
+
+// we define Z7_APM_SWITCH_TO_512_BYTES, because
+// we want to support old MACOS APMs that contain correct value only
+// for 512-bytes-step mode
+#define Z7_APM_SWITCH_TO_512_BYTES
+
+  const UInt32 numBlocks_from_Header = Get32(buf32 + 1);
+  UInt32 numBlocks = 0;
+  {
+    for (unsigned k = 0; k < numPadSectors; k++)
+    {
+      RINOK(ReadStream_FALSE(stream, buf32, kSectorSize))
+#ifdef Z7_APM_SWITCH_TO_512_BYTES
+      if (k == 0)
+      {
+        if (GetUi32a(buf32) == 0x4d50        // "PM"
+            // && (Get32(buf32 + 0x58 / 4) & 1) // Flags::VALID
+            // some old APMs don't use VALID flag for Apple_partition_map item
+            && Get32(buf32 + 8 / 4) == 1)    // StartBlock
+        {
+          // we switch the mode to 512-bytes-step map reading:
+          numPadSectors = 0;
+          _blockSizeLog = 9;
+          break;
+        }
+      }
+#endif
+    }
+  }
+
   for (unsigned i = 0;;)
   {
-    RINOK(ReadStream_FALSE(stream, buf, kSectorSize));
+#ifdef Z7_APM_SWITCH_TO_512_BYTES
+    if (i != 0 || _blockSizeLog == blockSizeLog_from_Header)
+#endif
+    {
+      RINOK(ReadStream_FALSE(stream, buf32, kSectorSize))
+    }
  
     CItem item;
-    
-    UInt32 numBlocksInMap2 = 0;
-    if (!item.Parse(buf, numBlocksInMap2))
+    UInt32 numBlocksInMap = 0;
+    if (!item.Parse(buf32, numBlocksInMap))
       return S_FALSE;
-    if (i == 0)
-    {
-      numBlocksInMap = numBlocksInMap2;
-      if (numBlocksInMap > (1 << 8))
-        return S_FALSE;
-    }
-    else if (numBlocksInMap2 != numBlocksInMap)
+    // v24.09: we don't check that all entries have same (numBlocksInMap) values,
+    // because some APMs have different (numBlocksInMap) values, if (Apple_Void) is used.
+    if (numBlocksInMap > (1 << 8) || numBlocksInMap <= i)
       return S_FALSE;
 
-    UInt32 finish = item.StartBlock + item.NumBlocks;
+    const UInt32 finish = item.StartBlock + item.NumBlocks;
     if (finish < item.StartBlock)
       return S_FALSE;
-    _numBlocks = MyMax(_numBlocks, finish);
+    if (numBlocks < finish)
+        numBlocks = finish;
     
     _items.Add(item);
-    for (unsigned j = 1; j < numSkips; j++)
+    if (numPadSectors != 0)
     {
-      RINOK(ReadStream_FALSE(stream, buf, kSectorSize));
+      RINOK(stream->Seek(numPadSectors << 9, STREAM_SEEK_CUR, NULL))
     }
     if (++i == numBlocksInMap)
       break;
   }
   
-  _phySize = BlocksToBytes(_numBlocks);
+  _phySize = BlocksToBytes(numBlocks);
+  // _numBlocks = numBlocks;
+  const UInt64 physSize = (UInt64)numBlocks_from_Header << blockSizeLog_from_Header;
+  if (_phySize < physSize)
+      _phySize = physSize;
   _isArc = true;
-  return S_OK;
-}
-
-STDMETHODIMP CHandler::Open(IInStream *stream, const UInt64 *, IArchiveOpenCallback * /* callback */)
-{
-  COM_TRY_BEGIN
-  Close();
-  RINOK(ReadTables(stream));
   _stream = stream;
+
   return S_OK;
   COM_TRY_END
 }
 
-STDMETHODIMP CHandler::Close()
+
+Z7_COM7F_IMF(CHandler::Close())
 {
   _isArc = false;
   _phySize = 0;
@@ -197,30 +283,31 @@ STDMETHODIMP CHandler::Close()
   return S_OK;
 }
 
+
 static const Byte kProps[] =
 {
   kpidPath,
   kpidSize,
-  kpidOffset
+  kpidOffset,
+  kpidCharacts
+  // , kpidCpu
 };
 
 static const Byte kArcProps[] =
 {
   kpidClusterSize
+  // , kpidNumBlocks
 };
 
 IMP_IInArchive_Props
 IMP_IInArchive_ArcProps
 
-static AString GetString(const char *s)
+static void GetString(AString &dest, const char *src)
 {
-  AString res;
-  for (unsigned i = 0; i < 32 && s[i] != 0; i++)
-    res += s[i];
-  return res;
+  dest.SetFrom_CalcLen(src, k_Str_Size);
 }
 
-STDMETHODIMP CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value)
+Z7_COM7F_IMF(CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value))
 {
   COM_TRY_BEGIN
   NCOM::CPropVariant prop;
@@ -231,11 +318,14 @@ STDMETHODIMP CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value)
       int mainIndex = -1;
       FOR_VECTOR (i, _items)
       {
-        AString s (GetString(_items[i].Type));
-        if (s != "Apple_Free" &&
-            s != "Apple_partition_map")
+        const CItem &item = _items[i];
+        if (!item.Is_Valid_and_Allocated())
+          continue;
+        AString s;
+        GetString(s, item.Type);
+        if (NDmg::Is_Apple_FS_Or_Unknown(s))
         {
-          if (mainIndex >= 0)
+          if (mainIndex != -1)
           {
             mainIndex = -1;
             break;
@@ -243,12 +333,13 @@ STDMETHODIMP CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value)
           mainIndex = (int)i;
         }
       }
-      if (mainIndex >= 0)
-        prop = (UInt32)mainIndex;
+      if (mainIndex != -1)
+        prop = (UInt32)(Int32)mainIndex;
       break;
     }
     case kpidClusterSize: prop = (UInt32)1 << _blockSizeLog; break;
     case kpidPhySize: prop = _phySize; break;
+    // case kpidNumBlocks: prop = _numBlocks; break;
 
     case kpidErrorFlags:
     {
@@ -263,13 +354,13 @@ STDMETHODIMP CHandler::GetArchiveProperty(PROPID propID, PROPVARIANT *value)
   COM_TRY_END
 }
 
-STDMETHODIMP CHandler::GetNumberOfItems(UInt32 *numItems)
+Z7_COM7F_IMF(CHandler::GetNumberOfItems(UInt32 *numItems))
 {
   *numItems = _items.Size();
   return S_OK;
 }
 
-STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *value)
+Z7_COM7F_IMF(CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *value))
 {
   COM_TRY_BEGIN
   NCOM::CPropVariant prop;
@@ -278,25 +369,41 @@ STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *val
   {
     case kpidPath:
     {
-      AString s (GetString(item.Name));
+      AString s;
+      GetString(s, item.Name);
       if (s.IsEmpty())
         s.Add_UInt32(index);
-      AString type (GetString(item.Type));
-      if (type == "Apple_HFS")
-        type = "hfs";
+      AString type;
+      GetString(type, item.Type);
+      {
+        const char *ext = NDmg::Find_Apple_FS_Ext(type);
+        if (ext)
+          type = ext;
+      }
       if (!type.IsEmpty())
       {
-        s += '.';
+        s.Add_Dot();
         s += type;
       }
       prop = s;
       break;
     }
+/*
+    case kpidCpu:
+    {
+      AString s;
+      s.SetFrom_CalcLen(item.Processor, sizeof(item.Processor));
+      if (!s.IsEmpty())
+        prop = s;
+      break;
+    }
+*/
     case kpidSize:
     case kpidPackSize:
       prop = BlocksToBytes(item.NumBlocks);
       break;
     case kpidOffset: prop = BlocksToBytes(item.StartBlock); break;
+    case kpidCharacts: FLAGS_TO_PROP(k_Flags, item.Flags, prop); break;
   }
   prop.Detach(value);
   return S_OK;
@@ -306,7 +413,7 @@ STDMETHODIMP CHandler::GetProperty(UInt32 index, PROPID propID, PROPVARIANT *val
 static const Byte k_Signature[] = { kSig0, kSig1 };
 
 REGISTER_ARC_I(
-  "APM", "apm", 0, 0xD4,
+  "APM", "apm", NULL, 0xD4,
   k_Signature,
   0,
   0,

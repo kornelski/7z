@@ -1,23 +1,22 @@
 // Windows/FileIO.h
 
-#ifndef __WINDOWS_FILE_IO_H
-#define __WINDOWS_FILE_IO_H
+#ifndef ZIP7_INC_WINDOWS_FILE_IO_H
+#define ZIP7_INC_WINDOWS_FILE_IO_H
 
 #include "../Common/MyWindows.h"
 
-#define _my_IO_REPARSE_TAG_MOUNT_POINT  (0xA0000003L)
-#define _my_IO_REPARSE_TAG_SYMLINK      (0xA000000CL)
-#define _my_IO_REPARSE_TAG_LX_SYMLINK   (0xA000001DL)
+#define Z7_WIN_IO_REPARSE_TAG_MOUNT_POINT  (0xA0000003L)
+#define Z7_WIN_IO_REPARSE_TAG_SYMLINK      (0xA000000CL)
+#define Z7_WIN_IO_REPARSE_TAG_LX_SYMLINK   (0xA000001DL)
 
-#define _my_SYMLINK_FLAG_RELATIVE 1
+#define Z7_WIN_SYMLINK_FLAG_RELATIVE 1
 
-// what the meaning of that FLAG or field (2)?
-#define _my_LX_SYMLINK_FLAG 2
+#define Z7_WIN_LX_SYMLINK_VERSION_2 2
 
 #ifdef _WIN32
 
 #if defined(_WIN32) && !defined(UNDER_CE)
-#include <WinIoCtl.h>
+#include <winioctl.h>
 #endif
 
 #else
@@ -29,6 +28,8 @@
 
 #include "../Common/MyString.h"
 #include "../Common/MyBuffer.h"
+
+#include "../Windows/TimeUtils.h"
 
 #include "Defs.h"
 
@@ -42,7 +43,33 @@ namespace NWindows {
 namespace NFile {
 
 #if defined(_WIN32) && !defined(UNDER_CE)
-bool FillLinkData(CByteBuffer &dest, const wchar_t *path, bool isSymLink, bool isWSL);
+/*
+  in:  (CByteBuffer &dest) is empty
+  in:  (path) uses Windows path separator (\).
+  out: (path) uses   Linux path separator (/).
+       if (isAbsPath == true), then "c:\\" prefix is replaced to "/mnt/c/" prefix
+*/
+void Convert_WinPath_to_WslLinuxPath(FString &path, bool convertDrivePath);
+// (path) must use Linux path separator (/).
+void FillLinkData_WslLink(CByteBuffer &dest, const wchar_t *path);
+
+/*
+  in:  (CByteBuffer &dest) is empty
+  if (isSymLink == false) : MOUNT_POINT : (path) must be absolute.
+  if (isSymLink == true)  : SYMLINK : Windows
+  (path) must use Windows path separator (\).
+  (path) must be without link "\\??\\" prefix.
+  link "\\??\\" prefix will be added inside FillLinkData(), if path is absolute.
+*/
+void FillLinkData_WinLink(CByteBuffer &dest, const wchar_t *path, bool isSymLink);
+// in: (CByteBuffer &dest) is empty
+inline void FillLinkData(CByteBuffer &dest, const wchar_t *path, bool isSymLink, bool isWSL)
+{
+  if (isWSL)
+    FillLinkData_WslLink(dest, path);
+  else
+    FillLinkData_WinLink(dest, path, isSymLink);
+}
 #endif
 
 struct CReparseShortInfo
@@ -59,7 +86,6 @@ struct CReparseAttr
   UInt32 Flags;
   UString SubsName;
   UString PrintName;
-
   AString WslName;
 
   bool HeaderError;
@@ -69,31 +95,32 @@ struct CReparseAttr
 
   CReparseAttr(): Tag(0), Flags(0) {}
 
-  // Parse()
-  // returns (true) and (ErrorCode = 0), if (it'a correct known link)
+  // returns (true) and (ErrorCode = 0), if (it's correct known link)
   // returns (false) and (ErrorCode = ERROR_REPARSE_TAG_INVALID), if unknown tag
   bool Parse(const Byte *p, size_t size);
 
-  bool IsMountPoint()  const { return Tag == _my_IO_REPARSE_TAG_MOUNT_POINT; } // it's Junction
-  bool IsSymLink_Win() const { return Tag == _my_IO_REPARSE_TAG_SYMLINK; }
-  bool IsSymLink_WSL() const { return Tag == _my_IO_REPARSE_TAG_LX_SYMLINK; }
+  bool IsMountPoint()  const { return Tag == Z7_WIN_IO_REPARSE_TAG_MOUNT_POINT; } // it's Junction
+  bool IsSymLink_Win() const { return Tag == Z7_WIN_IO_REPARSE_TAG_SYMLINK; }
+  bool IsSymLink_WSL() const { return Tag == Z7_WIN_IO_REPARSE_TAG_LX_SYMLINK; }
 
-  bool IsRelative_Win() const { return Flags == _my_SYMLINK_FLAG_RELATIVE; }
+  // note: "/dir1/path" is marked as relative.
+  bool IsRelative_Win() const { return Flags == Z7_WIN_SYMLINK_FLAG_RELATIVE; }
 
   bool IsRelative_WSL() const
   {
-    if (WslName.IsEmpty())
-      return true;
-    char c = WslName[0];
-    return !IS_PATH_SEPAR(c);
+    return WslName[0] != '/'; // WSL uses unix path separator
   }
-
-  // bool IsVolume() const;
 
   bool IsOkNamePair() const;
   UString GetPath() const;
 };
 
+#ifdef _WIN32
+#define CFiInfo BY_HANDLE_FILE_INFORMATION
+#define ST_MTIME(st) (st).ftLastWriteTime
+#else
+#define CFiInfo stat
+#endif
 
 #ifdef _WIN32
 
@@ -133,14 +160,29 @@ public:
 
 public:
   bool PreserveATime;
-  #ifdef SUPPORT_DEVICE_FILE
+#if 0
+  bool IsStdStream;
+  bool IsStdPipeStream;
+#endif
+#ifdef Z7_DEVICE_FILE
   bool IsDeviceFile;
   bool SizeDefined;
   UInt64 Size; // it can be larger than real available size
-  #endif
+#endif
 
-  CFileBase(): _handle(INVALID_HANDLE_VALUE), PreserveATime(false) {};
+  CFileBase():
+    _handle(INVALID_HANDLE_VALUE),
+    PreserveATime(false)
+#if 0
+    , IsStdStream(false),
+    , IsStdPipeStream(false)
+#endif
+    {}
   ~CFileBase() { Close(); }
+
+  HANDLE GetHandle() const { return _handle; }
+
+  // void Detach() { _handle = INVALID_HANDLE_VALUE; }
 
   bool Close() throw();
 
@@ -183,7 +225,7 @@ struct my_DISK_GEOMETRY_EX
 
 class CInFile: public CFileBase
 {
-  #ifdef SUPPORT_DEVICE_FILE
+  #ifdef Z7_DEVICE_FILE
 
   #ifndef UNDER_CE
   
@@ -211,7 +253,38 @@ public:
   bool OpenShared(CFSTR fileName, bool shareForWrite);
   bool Open(CFSTR fileName);
 
+#if 0
+  bool AttachStdIn()
+  {
+    IsDeviceFile = false;
+    const HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+    if (h == INVALID_HANDLE_VALUE || !h)
+      return false;
+    IsStdStream = true;
+    IsStdPipeStream = true;
+    _handle = h;
+    return true;
+  }
+#endif
+
   #ifndef UNDER_CE
+
+  bool Open_for_ReadAttributes(CFSTR fileName)
+  {
+    return Create(fileName, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS);
+    // we must use (FILE_FLAG_BACKUP_SEMANTICS) to open handle of directory.
+  }
+
+  bool Open_for_FileRenameInformation(CFSTR fileName)
+  {
+    return Create(fileName, DELETE | SYNCHRONIZE | GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL);
+    // we must use (FILE_FLAG_BACKUP_SEMANTICS) to open handle of directory.
+  }
 
   bool OpenReparse(CFSTR fileName)
   {
@@ -234,14 +307,24 @@ public:
 
 class COutFile: public CFileBase
 {
+  bool Open_Disposition(CFSTR fileName, DWORD creationDisposition);
 public:
   bool Open(CFSTR fileName, DWORD shareMode, DWORD creationDisposition, DWORD flagsAndAttributes);
-  bool Open(CFSTR fileName, DWORD creationDisposition);
-  bool Create(CFSTR fileName, bool createAlways);
-  bool CreateAlways(CFSTR fileName, DWORD flagsAndAttributes);
+  bool Open_EXISTING(CFSTR fileName)
+    { return Open_Disposition(fileName, OPEN_EXISTING); }
+  bool Create_ALWAYS_or_Open_ALWAYS(CFSTR fileName, bool createAlways)
+    { return Open_Disposition(fileName, createAlways ? CREATE_ALWAYS : OPEN_ALWAYS); }
+  bool Create_ALWAYS_or_NEW(CFSTR fileName, bool createAlways)
+    { return Open_Disposition(fileName, createAlways ? CREATE_ALWAYS : CREATE_NEW); }
+  bool Create_ALWAYS(CFSTR fileName)
+    { return Open_Disposition(fileName, CREATE_ALWAYS); }
+  bool Create_NEW(CFSTR fileName)
+    { return Open_Disposition(fileName, CREATE_NEW); }
+  
+  bool Create_ALWAYS_with_Attribs(CFSTR fileName, DWORD flagsAndAttributes);
 
-  bool SetTime(const FILETIME *cTime, const FILETIME *aTime, const FILETIME *mTime) throw();
-  bool SetMTime(const FILETIME *mTime) throw();
+  bool SetTime(const CFiTime *cTime, const CFiTime *aTime, const CFiTime *mTime) throw();
+  bool SetMTime(const CFiTime *mTime) throw();
   bool WritePart(const void *data, UInt32 size, UInt32 &processedSize) throw();
   bool Write(const void *data, UInt32 size, UInt32 &processedSize) throw();
   bool WriteFull(const void *data, size_t size) throw();
@@ -270,12 +353,26 @@ class CFileBase
 protected:
   int _handle;
 
-  bool OpenBinary(const char *name, int flags);
+  /*
+  bool IsDeviceFile;
+  bool SizeDefined;
+  UInt64 Size; // it can be larger than real available size
+  */
+
+  bool OpenBinary(const char *name, int flags, mode_t mode = 0666);
 public:
   bool PreserveATime;
+#if 0
+  bool IsStdStream;
+#endif
 
-  CFileBase(): _handle(-1), PreserveATime(false) {};
+  CFileBase(): _handle(-1), PreserveATime(false)
+#if 0
+    , IsStdStream(false)
+#endif
+  {}
   ~CFileBase() { Close(); }
+  // void Detach() { _handle = -1; }
   bool Close();
   bool GetLength(UInt64 &length) const;
   off_t seek(off_t distanceToMove, int moveMethod) const;
@@ -283,6 +380,11 @@ public:
   off_t seekToCur() const throw();
   // bool SeekToBegin() throw();
   int my_fstat(struct stat *st) const  { return fstat(_handle, st); }
+  /*
+  int my_ioctl_BLKGETSIZE64(unsigned long long *val);
+  int GetDeviceSize_InBytes(UInt64 &size);
+  void CalcDeviceSize(CFSTR s);
+  */
 };
 
 class CInFile: public CFileBase
@@ -290,6 +392,15 @@ class CInFile: public CFileBase
 public:
   bool Open(const char *name);
   bool OpenShared(const char *name, bool shareForWrite);
+#if 0
+  bool AttachStdIn()
+  {
+    _handle = GetStdHandle(STD_INPUT_HANDLE);
+    if (_handle == INVALID_HANDLE_VALUE || !_handle)
+      return false;
+    IsStdStream = true;
+  }
+#endif
   ssize_t read_part(void *data, size_t size) throw();
   // ssize_t read_full(void *data, size_t size, size_t &processed);
   bool ReadFull(void *data, size_t size, size_t &processedSize) throw();
@@ -300,23 +411,32 @@ class COutFile: public CFileBase
   bool CTime_defined;
   bool ATime_defined;
   bool MTime_defined;
-
-  FILETIME CTime;
-  FILETIME ATime;
-  FILETIME MTime;
+  CFiTime CTime;
+  CFiTime ATime;
+  CFiTime MTime;
 
   AString Path;
   ssize_t write_part(const void *data, size_t size) throw();
+  bool OpenBinary_forWrite_oflag(const char *name, int oflag);
 public:
+  mode_t mode_for_Create;
+
   COutFile():
       CTime_defined(false),
       ATime_defined(false),
-      MTime_defined(false)
+      MTime_defined(false),
+      mode_for_Create(0666)
       {}
 
   bool Close();
-  bool Create(const char *name, bool createAlways);
-  bool Open(const char *name, DWORD creationDisposition);
+
+  bool Open_EXISTING(CFSTR fileName);
+  bool Create_ALWAYS_or_Open_ALWAYS(CFSTR fileName, bool createAlways);
+  bool Create_ALWAYS(CFSTR fileName);
+  bool Create_NEW(CFSTR fileName);
+  // bool Create_ALWAYS_or_NEW(CFSTR fileName, bool createAlways);
+  // bool Open_Disposition(const char *name, DWORD creationDisposition);
+
   ssize_t write_full(const void *data, size_t size, size_t &processed) throw();
 
   bool WriteFull(const void *data, size_t size) throw()
@@ -333,8 +453,8 @@ public:
   {
     return SetLength(length);
   }
-  bool SetTime(const FILETIME *cTime, const FILETIME *aTime, const FILETIME *mTime) throw();
-  bool SetMTime(const FILETIME *mTime) throw();
+  bool SetTime(const CFiTime *cTime, const CFiTime *aTime, const CFiTime *mTime) throw();
+  bool SetMTime(const CFiTime *mTime) throw();
 };
 
 }

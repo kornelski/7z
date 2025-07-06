@@ -1,5 +1,7 @@
 PROG = 7zFM.exe
 
+# CFLAGS = $(CFLAGS) -DZ7_LARGE_PAGES
+
 !include "../Format7zF/Arc.mak"
 
 !include "../../UI/FileManager/FM.mak"
@@ -20,7 +22,6 @@ WIN_OBJS = $(WIN_OBJS) \
   $O\MemoryLock.obj \
   $O\Menu.obj \
   $O\ProcessUtils.obj \
-  $O\PropVariantConv.obj \
   $O\Registry.obj \
   $O\ResourceString.obj \
   $O\SystemInfo.obj \
@@ -37,6 +38,7 @@ WIN_CTRL_OBJS = \
 7ZIP_COMMON_OBJS = $(7ZIP_COMMON_OBJS) \
   $O\FilePathAutoRename.obj \
   $O\FileStreams.obj \
+  $O\MultiOutStream.obj \
 
 UI_COMMON_OBJS = \
   $O\ArchiveExtractCallback.obj \

@@ -2,7 +2,7 @@
 
 #include "StdAfx.h"
 
-#ifndef _7ZIP_ST
+#ifndef Z7_ST
 #include "../../../Windows/Synchronization.h"
 #endif
 
@@ -14,7 +14,7 @@
 using namespace NWindows;
 using namespace NFar;
 
-#ifndef _7ZIP_ST
+#ifndef Z7_ST
 static NSynchronization::CCriticalSection g_CriticalSection;
 #define MT_LOCK NSynchronization::CCriticalSectionLock lock(g_CriticalSection);
 #else
@@ -27,7 +27,7 @@ static HRESULT CheckBreak2()
 }
 
 
-STDMETHODIMP CUpdateCallback100Imp::ScanProgress(UInt64 numFolders, UInt64 numFiles, UInt64 totalSize, const wchar_t *path, Int32 /* isDir */)
+Z7_COM7F_IMF(CUpdateCallback100Imp::ScanProgress(UInt64 numFolders, UInt64 numFiles, UInt64 totalSize, const wchar_t *path, Int32 /* isDir */))
 {
   MT_LOCK
 
@@ -43,14 +43,14 @@ STDMETHODIMP CUpdateCallback100Imp::ScanProgress(UInt64 numFolders, UInt64 numFi
   return CheckBreak2();
 }
 
-STDMETHODIMP CUpdateCallback100Imp::ScanError(const wchar_t *path, HRESULT errorCode)
+Z7_COM7F_IMF(CUpdateCallback100Imp::ScanError(const wchar_t *path, HRESULT errorCode))
 {
   if (ShowSysErrorMessage(errorCode, path) == -1)
     return E_ABORT;
   return CheckBreak2();
 }
 
-STDMETHODIMP CUpdateCallback100Imp::SetNumFiles(UInt64 numFiles)
+Z7_COM7F_IMF(CUpdateCallback100Imp::SetNumFiles(UInt64 numFiles))
 {
   MT_LOCK
 
@@ -63,12 +63,12 @@ STDMETHODIMP CUpdateCallback100Imp::SetNumFiles(UInt64 numFiles)
 }
 
 
-STDMETHODIMP CUpdateCallback100Imp::SetTotal(const UInt64 * /* files */, const UInt64 * /* bytes */)
+Z7_COM7F_IMF(CUpdateCallback100Imp::SetTotal(const UInt64 * /* files */, const UInt64 * /* bytes */))
 {
   return S_OK;
 }
 
-STDMETHODIMP CUpdateCallback100Imp::SetCompleted(const UInt64 * /* files */, const UInt64 * /* bytes */)
+Z7_COM7F_IMF(CUpdateCallback100Imp::SetCompleted(const UInt64 * /* files */, const UInt64 * /* bytes */))
 {
   MT_LOCK
   return CheckBreak2();
@@ -76,7 +76,7 @@ STDMETHODIMP CUpdateCallback100Imp::SetCompleted(const UInt64 * /* files */, con
 
 
 
-STDMETHODIMP CUpdateCallback100Imp::SetTotal(UInt64 size)
+Z7_COM7F_IMF(CUpdateCallback100Imp::SetTotal(UInt64 size))
 {
   MT_LOCK
 
@@ -88,7 +88,7 @@ STDMETHODIMP CUpdateCallback100Imp::SetTotal(UInt64 size)
   return CheckBreak2();
 }
 
-STDMETHODIMP CUpdateCallback100Imp::SetCompleted(const UInt64 *completeValue)
+Z7_COM7F_IMF(CUpdateCallback100Imp::SetCompleted(const UInt64 *completeValue))
 {
   MT_LOCK
 
@@ -101,7 +101,7 @@ STDMETHODIMP CUpdateCallback100Imp::SetCompleted(const UInt64 *completeValue)
   return CheckBreak2();
 }
 
-STDMETHODIMP CUpdateCallback100Imp::CompressOperation(const wchar_t *name)
+Z7_COM7F_IMF(CUpdateCallback100Imp::CompressOperation(const wchar_t *name))
 {
   MT_LOCK
   
@@ -111,10 +111,10 @@ STDMETHODIMP CUpdateCallback100Imp::CompressOperation(const wchar_t *name)
     _percent->FileName = name;
     _percent->Print();
   }
-  return CheckBreak2();;
+  return CheckBreak2();
 }
 
-STDMETHODIMP CUpdateCallback100Imp::DeleteOperation(const wchar_t *name)
+Z7_COM7F_IMF(CUpdateCallback100Imp::DeleteOperation(const wchar_t *name))
 {
   MT_LOCK
 
@@ -124,10 +124,10 @@ STDMETHODIMP CUpdateCallback100Imp::DeleteOperation(const wchar_t *name)
     _percent->FileName = name;
     _percent->Print();
   }
-  return CheckBreak2();;
+  return CheckBreak2();
 }
 
-STDMETHODIMP CUpdateCallback100Imp::OperationResult(Int32 /* opRes */)
+Z7_COM7F_IMF(CUpdateCallback100Imp::OperationResult(Int32 /* opRes */))
 {
   MT_LOCK
   
@@ -138,7 +138,7 @@ STDMETHODIMP CUpdateCallback100Imp::OperationResult(Int32 /* opRes */)
   return CheckBreak2();
 }
 
-STDMETHODIMP CUpdateCallback100Imp::UpdateErrorMessage(const wchar_t *message)
+Z7_COM7F_IMF(CUpdateCallback100Imp::UpdateErrorMessage(const wchar_t *message))
 {
   MT_LOCK
 
@@ -147,14 +147,14 @@ STDMETHODIMP CUpdateCallback100Imp::UpdateErrorMessage(const wchar_t *message)
   return CheckBreak2();
 }
 
-HRESULT CUpdateCallback100Imp::OpenFileError(const wchar_t *path, HRESULT errorCode)
+Z7_COM7F_IMF(CUpdateCallback100Imp::OpenFileError(const wchar_t *path, HRESULT errorCode))
 {
   if (ShowSysErrorMessage(errorCode, path) == -1)
     return E_ABORT;
   return CheckBreak2();
 }
 
-STDMETHODIMP CUpdateCallback100Imp::ReadingFileError(const wchar_t *path, HRESULT errorCode)
+Z7_COM7F_IMF(CUpdateCallback100Imp::ReadingFileError(const wchar_t *path, HRESULT errorCode))
 {
   if (ShowSysErrorMessage(errorCode, path) == -1)
     return E_ABORT;
@@ -163,7 +163,7 @@ STDMETHODIMP CUpdateCallback100Imp::ReadingFileError(const wchar_t *path, HRESUL
 
 void SetExtractErrorMessage(Int32 opRes, Int32 encrypted, AString &s);
 
-STDMETHODIMP CUpdateCallback100Imp::ReportExtractResult(Int32 opRes, Int32 isEncrypted, const wchar_t *name)
+Z7_COM7F_IMF(CUpdateCallback100Imp::ReportExtractResult(Int32 opRes, Int32 isEncrypted, const wchar_t *name))
 {
   MT_LOCK
 
@@ -179,7 +179,7 @@ STDMETHODIMP CUpdateCallback100Imp::ReportExtractResult(Int32 opRes, Int32 isEnc
 }
 
 
-STDMETHODIMP CUpdateCallback100Imp::ReportUpdateOperation(UInt32 op, const wchar_t *name, Int32 /* isDir */)
+Z7_COM7F_IMF(CUpdateCallback100Imp::ReportUpdateOperation(UInt32 op, const wchar_t *name, Int32 /* isDir */))
 {
   const char *s;
   switch (op)
@@ -206,26 +206,116 @@ STDMETHODIMP CUpdateCallback100Imp::ReportUpdateOperation(UInt32 op, const wchar
     _percent->Print();
   }
   
-  return CheckBreak2();;
+  return CheckBreak2();
+}
+
+
+HRESULT CUpdateCallback100Imp::MoveArc_UpdateStatus()
+{
+  MT_LOCK
+
+  if (_percent)
+  {
+    AString s;
+    s.Add_UInt64(_arcMoving_percents);
+    // status.Add_Space();
+    s.Add_Char('%');
+    const bool totalDefined = (_arcMoving_total != 0 && _arcMoving_total != (UInt64)(Int64)-1);
+    if (_arcMoving_current != 0 || totalDefined)
+    {
+      s += " : ";
+      s.Add_UInt64(_arcMoving_current >> 20);
+      s += " MiB";
+    }
+    if (totalDefined)
+    {
+      s += " / ";
+      s.Add_UInt64((_arcMoving_total + ((1 << 20) - 1)) >> 20);
+      s += " MiB";
+    }
+    s += " : temporary archive moving ...";
+    _percent->Command =  s;
+    _percent->Print();
+  }
+
+  return CheckBreak2();
+}
+
+
+Z7_COM7F_IMF(CUpdateCallback100Imp::MoveArc_Start(const wchar_t *srcTempPath, const wchar_t * /* destFinalPath */ , UInt64 size, Int32 /* updateMode */))
+{
+  MT_LOCK
+
+  _arcMoving_total = size;
+  _arcMoving_current = 0;
+  _arcMoving_percents = 0;
+  // _arcMoving_updateMode = updateMode;
+  // _name2 = fs2us(destFinalPath);
+  if (_percent)
+    _percent->FileName = srcTempPath;
+  return MoveArc_UpdateStatus();
+}
+
+Z7_COM7F_IMF(CUpdateCallback100Imp::MoveArc_Progress(UInt64 totalSize, UInt64 currentSize))
+{
+  UInt64 percents = 0;
+  if (totalSize != 0)
+  {
+    if (totalSize < ((UInt64)1 << 57))
+      percents = currentSize * 100 / totalSize;
+    else
+      percents = currentSize / (totalSize / 100);
+  }
+
+#ifdef _WIN32
+  // Sleep(300); // for debug
+#endif
+  if (percents == _arcMoving_percents)
+    return CheckBreak2();
+  _arcMoving_total = totalSize;
+  _arcMoving_current = currentSize;
+  _arcMoving_percents = percents;
+  // if (_arcMoving_percents > 100) return E_FAIL;
+  return MoveArc_UpdateStatus();
+}
+
+
+Z7_COM7F_IMF(CUpdateCallback100Imp::MoveArc_Finish())
+{
+  // _arcMoving_percents = 0;
+  if (_percent)
+  {
+    _percent->Command.Empty();
+    _percent->FileName.Empty();
+    _percent->Print();
+  }
+  return CheckBreak2();
+}
+
+
+Z7_COM7F_IMF(CUpdateCallback100Imp::Before_ArcReopen())
+{
+  // fixme: we can use Clear_Stop_Status() here
+  return CheckBreak2();
 }
 
 
 extern HRESULT GetPassword(UString &password);
 
-STDMETHODIMP CUpdateCallback100Imp::CryptoGetTextPassword(BSTR *password)
+Z7_COM7F_IMF(CUpdateCallback100Imp::CryptoGetTextPassword(BSTR *password))
 {
   MT_LOCK
 
   *password = NULL;
   if (!PasswordIsDefined)
   {
-    RINOK(GetPassword(Password));
+    RINOK(GetPassword(Password))
     PasswordIsDefined = true;
   }
   return StringToBstr(Password, password);
 }
 
-STDMETHODIMP CUpdateCallback100Imp::CryptoGetTextPassword2(Int32 *passwordIsDefined, BSTR *password)
+Z7_COM7F_IMF(CUpdateCallback100Imp::CryptoGetTextPassword2(Int32 *passwordIsDefined, BSTR *password))
 {
   MT_LOCK
 

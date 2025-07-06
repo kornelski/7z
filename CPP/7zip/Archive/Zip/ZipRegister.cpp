@@ -17,12 +17,22 @@ static const Byte k_Signature[] = {
     6, 0x50, 0x4B, 0x30, 0x30, 0x50, 0x4B }; // NoSpan
 
 REGISTER_ARC_IO(
-  "zip", "zip z01 zipx jar xpi odt ods docx xlsx epub ipa apk appx", 0, 1,
+  "zip", "zip z01 zipx jar xpi odt ods docx xlsx epub ipa apk appx", NULL, 1,
   k_Signature,
   0,
-  NArcInfoFlags::kFindSignature |
-  NArcInfoFlags::kMultiSignature |
-  NArcInfoFlags::kUseGlobalOffset,
-  IsArc_Zip)
+    NArcInfoFlags::kFindSignature
+  | NArcInfoFlags::kMultiSignature
+  | NArcInfoFlags::kUseGlobalOffset
+  | NArcInfoFlags::kCTime
+  // | NArcInfoFlags::kCTime_Default
+  | NArcInfoFlags::kATime
+  // | NArcInfoFlags::kATime_Default
+  | NArcInfoFlags::kMTime
+  | NArcInfoFlags::kMTime_Default
+  , TIME_PREC_TO_ARC_FLAGS_MASK (NFileTimeType::kWindows)
+  | TIME_PREC_TO_ARC_FLAGS_MASK (NFileTimeType::kUnix)
+  | TIME_PREC_TO_ARC_FLAGS_MASK (NFileTimeType::kDOS)
+  | TIME_PREC_TO_ARC_FLAGS_TIME_DEFAULT (NFileTimeType::kWindows)
+  , IsArc_Zip)
  
 }}

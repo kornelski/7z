@@ -7,6 +7,8 @@
 #ifndef _WIN32
 #include <fcntl.h>           /* Definition of AT_* constants */
 #include "TimeUtils.h"
+// for major
+// #include <sys/sysmacros.h>
 #endif
 
 #include "FileFind.h"
@@ -23,6 +25,14 @@ using namespace NName;
 
 #if defined(_WIN32) && !defined(UNDER_CE)
 
+#if !defined(Z7_WIN32_WINNT_MIN) || Z7_WIN32_WINNT_MIN < 0x0502  // Win2003
+#define Z7_USE_DYN_FindFirstStream
+#endif
+
+#ifdef Z7_USE_DYN_FindFirstStream
+
+Z7_DIAGNOSTIC_IGNORE_CAST_FUNCTION
+
 EXTERN_C_BEGIN
 
 typedef enum
@@ -37,13 +47,19 @@ typedef struct
   WCHAR cStreamName[MAX_PATH + 36];
 } MY_WIN32_FIND_STREAM_DATA, *MY_PWIN32_FIND_STREAM_DATA;
 
-typedef HANDLE (WINAPI *FindFirstStreamW_Ptr)(LPCWSTR fileName, MY_STREAM_INFO_LEVELS infoLevel,
+typedef HANDLE (WINAPI *Func_FindFirstStreamW)(LPCWSTR fileName, MY_STREAM_INFO_LEVELS infoLevel,
     LPVOID findStreamData, DWORD flags);
 
-typedef BOOL (APIENTRY *FindNextStreamW_Ptr)(HANDLE findStream, LPVOID findStreamData);
+typedef BOOL (APIENTRY *Func_FindNextStreamW)(HANDLE findStream, LPVOID findStreamData);
 
 EXTERN_C_END
 
+#else
+
+#define MY_WIN32_FIND_STREAM_DATA  WIN32_FIND_STREAM_DATA
+#define My_FindStreamInfoStandard  FindStreamInfoStandard
+
+#endif
 #endif // defined(_WIN32) && !defined(UNDER_CE)
 
 
@@ -52,7 +68,7 @@ namespace NFile {
 
 
 #ifdef _WIN32
-#ifdef SUPPORT_DEVICE_FILE
+#ifdef Z7_DEVICE_FILE
 namespace NSystem
 {
 bool MyGetDiskFreeSpace(CFSTR rootPath, UInt64 &clusterSize, UInt64 &totalSize, UInt64 &freeSize);
@@ -62,24 +78,115 @@ bool MyGetDiskFreeSpace(CFSTR rootPath, UInt64 &clusterSize, UInt64 &totalSize, 
 
 namespace NFind {
 
+/*
+#ifdef _WIN32
 #define MY_CLEAR_FILETIME(ft) ft.dwLowDateTime = ft.dwHighDateTime = 0;
+#else
+#define MY_CLEAR_FILETIME(ft) ft.tv_sec = 0;  ft.tv_nsec = 0;
+#endif
+*/
 
 void CFileInfoBase::ClearBase() throw()
 {
   Size = 0;
-  MY_CLEAR_FILETIME(CTime);
-  MY_CLEAR_FILETIME(ATime);
-  MY_CLEAR_FILETIME(MTime);
+  FiTime_Clear(CTime);
+  FiTime_Clear(ATime);
+  FiTime_Clear(MTime);
+ 
+ #ifdef _WIN32
   Attrib = 0;
   // ReparseTag = 0;
   IsAltStream = false;
   IsDevice = false;
-
-  #ifndef _WIN32
+ #else
+  dev = 0;
   ino = 0;
-  nlink = 0;
   mode = 0;
-  #endif
+  nlink = 0;
+  uid = 0;
+  gid = 0;
+  rdev = 0;
+ #endif
+}
+
+
+bool CFileInfoBase::SetAs_StdInFile()
+{
+  ClearBase();
+  Size = (UInt64)(Int64)-1;
+  NTime::GetCurUtc_FiTime(MTime);
+  CTime = ATime = MTime;
+
+#ifdef _WIN32
+
+  /* in GUI mode : GetStdHandle(STD_INPUT_HANDLE) returns NULL,
+     and it doesn't set LastError.  */
+#if 1
+  SetLastError(0);
+  const HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+  if (!h || h == INVALID_HANDLE_VALUE)
+  {
+    if (GetLastError() == 0)
+      SetLastError(ERROR_INVALID_HANDLE);
+    return false;
+  }
+  BY_HANDLE_FILE_INFORMATION info;
+  if (GetFileInformationByHandle(h, &info)
+      && info.dwVolumeSerialNumber)
+  {
+    Size = (((UInt64)info.nFileSizeHigh) << 32) + info.nFileSizeLow;
+    // FileID_Low = (((UInt64)info.nFileIndexHigh) << 32) + info.nFileIndexLow;
+    // NumLinks = SupportHardLinks ? info.nNumberOfLinks : 1;
+    Attrib = info.dwFileAttributes;
+    CTime = info.ftCreationTime;
+    ATime = info.ftLastAccessTime;
+    MTime = info.ftLastWriteTime;
+  }
+#if 0
+  printf(
+    "\ndwFileAttributes = %8x"
+    "\nftCreationTime   = %8x"
+    "\nftLastAccessTime = %8x"
+    "\nftLastWriteTime  = %8x"
+    "\ndwVolumeSerialNumber  = %8x"
+    "\nnFileSizeHigh  = %8x"
+    "\nnFileSizeLow   = %8x"
+    "\nnNumberOfLinks  = %8x"
+    "\nnFileIndexHigh  = %8x"
+    "\nnFileIndexLow   = %8x \n",
+      (unsigned)info.dwFileAttributes,
+      (unsigned)info.ftCreationTime.dwHighDateTime,
+      (unsigned)info.ftLastAccessTime.dwHighDateTime,
+      (unsigned)info.ftLastWriteTime.dwHighDateTime,
+      (unsigned)info.dwVolumeSerialNumber,
+      (unsigned)info.nFileSizeHigh,
+      (unsigned)info.nFileSizeLow,
+      (unsigned)info.nNumberOfLinks,
+      (unsigned)info.nFileIndexHigh,
+      (unsigned)info.nFileIndexLow);
+#endif
+#endif
+
+#else // non-Wiondow
+
+  mode = S_IFIFO | 0777; // 0755 : 0775 : 0664 : 0644 :
+#if 1
+  struct stat st;
+  if (fstat(0, &st) == 0)
+  {
+    SetFrom_stat(st);
+    if (!S_ISREG(st.st_mode)
+        // S_ISFIFO(st->st_mode)
+        || st.st_size == 0)
+    {
+      Size = (UInt64)(Int64)-1;
+      // mode = S_IFIFO | 0777;
+    }
+  }
+#endif
+#endif
+
+  return true;
 }
 
 bool CFileInfo::IsDots() const throw()
@@ -115,7 +222,7 @@ bool CFileInfo::IsDots() const throw()
 
 static void Convert_WIN32_FIND_DATA_to_FileInfo(const WIN32_FIND_DATAW &fd, CFileInfo &fi)
 {
-  WIN_FD_TO_MY_FI(fi, fd);
+  WIN_FD_TO_MY_FI(fi, fd)
   fi.Name = us2fs(fd.cFileName);
   #if defined(_WIN32) && !defined(UNDER_CE)
   // fi.ShortName = us2fs(fd.cAlternateFileName);
@@ -125,7 +232,7 @@ static void Convert_WIN32_FIND_DATA_to_FileInfo(const WIN32_FIND_DATAW &fd, CFil
 #ifndef _UNICODE
 static void Convert_WIN32_FIND_DATA_to_FileInfo(const WIN32_FIND_DATA &fd, CFileInfo &fi)
 {
-  WIN_FD_TO_MY_FI(fi, fd);
+  WIN_FD_TO_MY_FI(fi, fd)
   fi.Name = fas2fs(fd.cFileName);
   #if defined(_WIN32) && !defined(UNDER_CE)
   // fi.ShortName = fas2fs(fd.cAlternateFileName);
@@ -198,7 +305,7 @@ bool CFindFile::FindFirst(CFSTR path, CFileInfo &fi)
 
     IF_USE_MAIN_PATH
       _handle = ::FindFirstFileW(fs2us(path), &fd);
-    #ifdef WIN_LONG_PATH
+    #ifdef Z7_LONG_PATH
     if (_handle == INVALID_HANDLE_VALUE && USE_SUPER_PATH)
     {
       UString superPath;
@@ -239,23 +346,34 @@ bool CFindFile::FindNext(CFileInfo &fi)
 ////////////////////////////////
 // AltStreams
 
-static FindFirstStreamW_Ptr g_FindFirstStreamW;
-static FindNextStreamW_Ptr g_FindNextStreamW;
-
+#ifdef Z7_USE_DYN_FindFirstStream
+static Func_FindFirstStreamW g_FindFirstStreamW;
+static Func_FindNextStreamW  g_FindNextStreamW;
+#define MY_FindFirstStreamW  g_FindFirstStreamW
+#define MY_FindNextStreamW   g_FindNextStreamW
 static struct CFindStreamLoader
 {
   CFindStreamLoader()
   {
-    HMODULE hm = ::GetModuleHandleA("kernel32.dll");
-    g_FindFirstStreamW = (FindFirstStreamW_Ptr)(void *)::GetProcAddress(hm, "FindFirstStreamW");
-    g_FindNextStreamW = (FindNextStreamW_Ptr)(void *)::GetProcAddress(hm, "FindNextStreamW");
+    const HMODULE hm = ::GetModuleHandleA("kernel32.dll");
+       g_FindFirstStreamW = Z7_GET_PROC_ADDRESS(
+    Func_FindFirstStreamW, hm,
+        "FindFirstStreamW");
+       g_FindNextStreamW = Z7_GET_PROC_ADDRESS(
+    Func_FindNextStreamW, hm,
+        "FindNextStreamW");
   }
 } g_FindStreamLoader;
+#else
+#define MY_FindFirstStreamW  FindFirstStreamW
+#define MY_FindNextStreamW   FindNextStreamW
+#endif
+
 
 bool CStreamInfo::IsMainStream() const throw()
 {
   return StringsAreEqualNoCase_Ascii(Name, "::$DATA");
-};
+}
 
 UString CStreamInfo::GetReducedName() const
 {
@@ -303,27 +421,29 @@ bool CFindStream::FindFirst(CFSTR path, CStreamInfo &si)
 {
   if (!Close())
     return false;
+#ifdef Z7_USE_DYN_FindFirstStream
   if (!g_FindFirstStreamW)
   {
     ::SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return false;
   }
+#endif
   {
     MY_WIN32_FIND_STREAM_DATA sd;
     SetLastError(0);
     IF_USE_MAIN_PATH
-      _handle = g_FindFirstStreamW(fs2us(path), My_FindStreamInfoStandard, &sd, 0);
+      _handle = MY_FindFirstStreamW(fs2us(path), My_FindStreamInfoStandard, &sd, 0);
     if (_handle == INVALID_HANDLE_VALUE)
     {
       if (::GetLastError() == ERROR_HANDLE_EOF)
         return false;
       // long name can be tricky for path like ".\dirName".
-      #ifdef WIN_LONG_PATH
+      #ifdef Z7_LONG_PATH
       if (USE_SUPER_PATH)
       {
         UString superPath;
         if (GetSuperPath(path, superPath, USE_MAIN_PATH))
-          _handle = g_FindFirstStreamW(superPath, My_FindStreamInfoStandard, &sd, 0);
+          _handle = MY_FindFirstStreamW(superPath, My_FindStreamInfoStandard, &sd, 0);
       }
       #endif
     }
@@ -336,14 +456,16 @@ bool CFindStream::FindFirst(CFSTR path, CStreamInfo &si)
 
 bool CFindStream::FindNext(CStreamInfo &si)
 {
+#ifdef Z7_USE_DYN_FindFirstStream
   if (!g_FindNextStreamW)
   {
     ::SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return false;
   }
+#endif
   {
     MY_WIN32_FIND_STREAM_DATA sd;
-    if (!g_FindNextStreamW(_handle, &sd))
+    if (!MY_FindNextStreamW(_handle, &sd))
       return false;
     Convert_WIN32_FIND_STREAM_DATA_to_StreamInfo(sd, si);
   }
@@ -401,7 +523,7 @@ DWORD GetFileAttrib(CFSTR path)
       if (dw != INVALID_FILE_ATTRIBUTES)
         return dw;
     }
-    #ifdef WIN_LONG_PATH
+    #ifdef Z7_LONG_PATH
     if (USE_SUPER_PATH)
     {
       UString superPath;
@@ -438,7 +560,21 @@ also we support paths that are not supported by FindFirstFile:
 
 bool CFileInfo::Find(CFSTR path, bool followLink)
 {
-  #ifdef SUPPORT_DEVICE_FILE
+  #ifdef Z7_DEVICE_FILE
+  
+  if (IS_PATH_SEPAR(path[0]) &&
+      IS_PATH_SEPAR(path[1]) &&
+      path[2] == '.' &&
+      path[3] == 0)
+  {
+    // 22.00 : it's virtual directory for devices
+    // IsDevice = true;
+    ClearBase();
+    Name = path + 2;
+    Attrib = FILE_ATTRIBUTE_DIRECTORY;
+    return true;
+  }
+  
   if (IsDevicePath(path))
   {
     ClearBase();
@@ -469,7 +605,7 @@ bool CFileInfo::Find(CFSTR path, bool followLink)
 
   #if defined(_WIN32) && !defined(UNDER_CE)
 
-  int colonPos = FindAltStreamColon(path);
+  const int colonPos = FindAltStreamColon(path);
   if (colonPos >= 0 && path[(unsigned)colonPos + 1] != 0)
   {
     UString streamName = fs2us(path + (unsigned)colonPos);
@@ -591,11 +727,11 @@ bool CFileInfo::Find(CFSTR path, bool followLink)
 
             FString s (path);
             s.Add_PathSepar();
-            s += '*'; // CHAR_ANY_MASK
+            s.Add_Char('*'); // CHAR_ANY_MASK
             bool isOK = false;
             if (finder.FindFirst(s, *this))
             {
-              if (Name == FTEXT("."))
+              if (Name.IsEqualTo("."))
               {
                 Name = path + prefixSize;
                 return true;
@@ -605,7 +741,7 @@ bool CFileInfo::Find(CFSTR path, bool followLink)
                  But it's possible that there are another items */
             }
             {
-              DWORD attrib = GetFileAttrib(path);
+              const DWORD attrib = GetFileAttrib(path);
               if (isOK || (attrib != INVALID_FILE_ATTRIBUTES && (attrib & FILE_ATTRIBUTE_DIRECTORY) != 0))
               {
                 ClearBase();
@@ -633,9 +769,16 @@ bool CFileInfo::Find(CFSTR path, bool followLink)
 
   // return FollowReparse(path, IsDir());
   return Fill_From_ByHandleFileInfo(path);
+/*
+  // Fill_From_ByHandleFileInfo returns false (with Access Denied error),
+  // if there is reparse link file (not directory reparse item).
+  if (Fill_From_ByHandleFileInfo(path))
+    return true;
+  return HasReparsePoint();
+*/
 }
 
-bool CFileInfo::Fill_From_ByHandleFileInfo(CFSTR path)
+bool CFileInfoBase::Fill_From_ByHandleFileInfo(CFSTR path)
 {
   BY_HANDLE_FILE_INFORMATION info;
   if (!NIO::CFileBase::GetFileInformation(path, &info))
@@ -732,7 +875,7 @@ bool DoesFileOrDirExist(CFSTR name)
 void CEnumerator::SetDirPrefix(const FString &dirPrefix)
 {
   _wildcard = dirPrefix;
-  _wildcard += '*';
+  _wildcard.Add_Char('*');
 }
 
 bool CEnumerator::NextAny(CFileInfo &fi)
@@ -820,7 +963,7 @@ HANDLE CFindChangeNotification::FindFirst(CFSTR path, bool watchSubtree, DWORD n
   {
     IF_USE_MAIN_PATH
     _handle = ::FindFirstChangeNotificationW(fs2us(path), BoolToBOOL(watchSubtree), notifyFilter);
-    #ifdef WIN_LONG_PATH
+    #ifdef Z7_LONG_PATH
     if (!IsHandleAllocated())
     {
       UString superPath;
@@ -894,7 +1037,7 @@ bool MyGetLogicalDriveStrings(CObjectVector<FString> &driveStrings)
 
 // ---------- POSIX ----------
 
-static int MY__lstat(CFSTR path, struct stat *st, bool followLink)
+static int MY_lstat(CFSTR path, struct stat *st, bool followLink)
 {
   memset(st, 0, sizeof(*st));
   int res;
@@ -910,18 +1053,26 @@ static int MY__lstat(CFSTR path, struct stat *st, bool followLink)
     // printf("\nstat\n");
     res = stat(path, st);
   }
-  /*
-  printf("\nres = %d\n", res);
-  printf("\n st_dev = %lld \n", (long long)(st->st_dev));
-  printf("\n st_ino = %lld \n", (long long)(st->st_ino));
-  printf("\n st_mode = %lld \n", (long long)(st->st_mode));
-  printf("\n st_nlink = %lld \n", (long long)(st->st_nlink));
-  printf("\n st_uid = %lld \n", (long long)(st->st_uid));
-  printf("\n st_gid = %lld \n", (long long)(st->st_gid));
-  printf("\n st_size = %lld \n", (long long)(st->st_size));
-  printf("\n st_blksize = %lld \n", (long long)(st->st_blksize));
-  printf("\n st_blocks = %lld \n", (long long)(st->st_blocks));
-  */
+#if 0
+#if defined(__clang__) && __clang_major__ >= 14
+  #pragma GCC diagnostic ignored "-Wc++98-compat-pedantic"
+#endif
+
+  printf("\n st_dev = %lld", (long long)(st->st_dev));
+  printf("\n st_ino = %lld", (long long)(st->st_ino));
+  printf("\n st_mode = %llx", (long long)(st->st_mode));
+  printf("\n st_nlink = %lld", (long long)(st->st_nlink));
+  printf("\n st_uid = %lld", (long long)(st->st_uid));
+  printf("\n st_gid = %lld", (long long)(st->st_gid));
+  printf("\n st_size = %lld", (long long)(st->st_size));
+  printf("\n st_blksize = %lld", (long long)(st->st_blksize));
+  printf("\n st_blocks = %lld", (long long)(st->st_blocks));
+  printf("\n st_ctim = %lld", (long long)(ST_CTIME((*st)).tv_sec));
+  printf("\n st_mtim = %lld", (long long)(ST_MTIME((*st)).tv_sec));
+  printf("\n st_atim = %lld", (long long)(ST_ATIME((*st)).tv_sec));
+     printf(S_ISFIFO(st->st_mode) ? "\n FIFO" : "\n NO FIFO");
+  printf("\n");
+#endif
 
   return res;
 }
@@ -950,13 +1101,6 @@ static const char *Get_Name_from_Path(CFSTR path) throw()
 }
 
 
-void timespec_To_FILETIME(const MY_ST_TIMESPEC &ts, FILETIME &ft)
-{
-  UInt64 v = NTime::UnixTime64ToFileTime64(ts.tv_sec) + ((UInt64)ts.tv_nsec / 100);
-  ft.dwLowDateTime = (DWORD)v;
-  ft.dwHighDateTime = (DWORD)(v >> 32);
-}
-
 UInt32 Get_WinAttribPosix_From_PosixMode(UInt32 mode)
 {
   UInt32 attrib = S_ISDIR(mode) ?
@@ -982,9 +1126,9 @@ UInt32 Get_WinAttrib_From_stat(const struct stat &st)
 }
 */
 
-void CFileInfo::SetFrom_stat(const struct stat &st)
+void CFileInfoBase::SetFrom_stat(const struct stat &st)
 {
-  IsDevice = false;
+  // IsDevice = false;
 
   if (S_ISDIR(st.st_mode))
   {
@@ -995,7 +1139,7 @@ void CFileInfo::SetFrom_stat(const struct stat &st)
     Size = (UInt64)st.st_size; // for a symbolic link, size = size of filename
   }
 
-  Attrib = Get_WinAttribPosix_From_PosixMode(st.st_mode);
+  // Attrib = Get_WinAttribPosix_From_PosixMode(st.st_mode);
 
   // NTime::UnixTimeToFileTime(st.st_ctime, CTime);
   // NTime::UnixTimeToFileTime(st.st_mtime, MTime);
@@ -1010,27 +1154,89 @@ void CFileInfo::SetFrom_stat(const struct stat &st)
   */
   // timespec_To_FILETIME(st.st_birthtimespec, CTime);
   // #else
-  timespec_To_FILETIME(st.st_ctimespec, CTime);
+  // timespec_To_FILETIME(st.st_ctimespec, CTime);
   // #endif
-  timespec_To_FILETIME(st.st_mtimespec, MTime);
-  timespec_To_FILETIME(st.st_atimespec, ATime);
+  // timespec_To_FILETIME(st.st_mtimespec, MTime);
+  // timespec_To_FILETIME(st.st_atimespec, ATime);
+  CTime = st.st_ctimespec;
+  MTime = st.st_mtimespec;
+  ATime = st.st_atimespec;
+
   #else
-  timespec_To_FILETIME(st.st_ctim, CTime);
-  timespec_To_FILETIME(st.st_mtim, MTime);
-  timespec_To_FILETIME(st.st_atim, ATime);
+  // timespec_To_FILETIME(st.st_ctim, CTime, &CTime_ns100);
+  // timespec_To_FILETIME(st.st_mtim, MTime, &MTime_ns100);
+  // timespec_To_FILETIME(st.st_atim, ATime, &ATime_ns100);
+  CTime = st.st_ctim;
+  MTime = st.st_mtim;
+  ATime = st.st_atim;
+
   #endif
 
   dev = st.st_dev;
   ino = st.st_ino;
-  nlink = st.st_nlink;
   mode = st.st_mode;
+  nlink = st.st_nlink;
+  uid = st.st_uid;
+  gid = st.st_gid;
+  rdev = st.st_rdev;
+
+  /*
+  printf("\n sizeof timespec = %d", (int)sizeof(timespec));
+  printf("\n sizeof st_rdev = %d", (int)sizeof(rdev));
+  printf("\n sizeof st_ino = %d", (int)sizeof(ino));
+  printf("\n sizeof mode_t = %d", (int)sizeof(mode_t));
+  printf("\n sizeof nlink_t = %d", (int)sizeof(nlink_t));
+  printf("\n sizeof uid_t = %d", (int)sizeof(uid_t));
+  printf("\n");
+  */
+  /*
+  printf("\n st_rdev = %llx", (long long)rdev);
+  printf("\n st_dev  = %llx", (long long)dev);
+  printf("\n dev  : major = %5x minor = %5x", (unsigned)major(dev), (unsigned)minor(dev));
+  printf("\n st_ino = %lld", (long long)(ino));
+  printf("\n rdev : major = %5x minor = %5x", (unsigned)major(rdev), (unsigned)minor(rdev));
+  printf("\n size = %lld \n", (long long)(Size));
+  printf("\n");
+  */
 }
+
+/*
+int Uid_To_Uname(uid_t uid, AString &name)
+{
+  name.Empty();
+  struct passwd *passwd;
+
+  if (uid != 0 && uid == cached_no_such_uid)
+    {
+      *uname = xstrdup ("");
+      return;
+    }
+
+  if (!cached_uname || uid != cached_uid)
+    {
+      passwd = getpwuid (uid);
+      if (passwd)
+  {
+    cached_uid = uid;
+    assign_string (&cached_uname, passwd->pw_name);
+  }
+      else
+  {
+    cached_no_such_uid = uid;
+    *uname = xstrdup ("");
+    return;
+  }
+    }
+  *uname = xstrdup (cached_uname);
+}
+*/
 
 bool CFileInfo::Find_DontFill_Name(CFSTR path, bool followLink)
 {
   struct stat st;
-  if (MY__lstat(path, &st, followLink) != 0)
+  if (MY_lstat(path, &st, followLink) != 0)
     return false;
+  // printf("\nFind_DontFill_Name : name=%s\n", path);
   SetFrom_stat(st);
   return true;
 }
@@ -1059,7 +1265,7 @@ bool DoesFileExist_Raw(CFSTR name)
 {
   // FIXME for symbolic links.
   struct stat st;
-  if (MY__lstat(name, &st, false) != 0)
+  if (MY_lstat(name, &st, false) != 0)
     return false;
   return !S_ISDIR(st.st_mode);
 }
@@ -1068,7 +1274,7 @@ bool DoesFileExist_FollowLink(CFSTR name)
 {
   // FIXME for symbolic links.
   struct stat st;
-  if (MY__lstat(name, &st, true) != 0)
+  if (MY_lstat(name, &st, true) != 0)
     return false;
   return !S_ISDIR(st.st_mode);
 }
@@ -1076,7 +1282,7 @@ bool DoesFileExist_FollowLink(CFSTR name)
 bool DoesDirExist(CFSTR name, bool followLink)
 {
   struct stat st;
-  if (MY__lstat(name, &st, followLink) != 0)
+  if (MY_lstat(name, &st, followLink) != 0)
     return false;
   return S_ISDIR(st.st_mode);
 }
@@ -1084,7 +1290,7 @@ bool DoesDirExist(CFSTR name, bool followLink)
 bool DoesFileOrDirExist(CFSTR name)
 {
   struct stat st;
-  if (MY__lstat(name, &st, false) != 0)
+  if (MY_lstat(name, &st, false) != 0)
     return false;
   return true;
 }
@@ -1106,10 +1312,10 @@ bool CDirEntry::IsDots() const throw()
   /* some systems (like CentOS 7.x on XFS) have (Type == DT_UNKNOWN)
      we can call fstatat() for that case, but we use only (Name) check here */
 
-  #if !defined(_AIX)
+#if !defined(_AIX) && !defined(__sun)
   if (Type != DT_DIR && Type != DT_UNKNOWN)
     return false;
-  #endif
+#endif
 
   return Name.Len() != 0
       && Name.Len() <= 2
@@ -1146,7 +1352,7 @@ bool CEnumerator::NextAny(CDirEntry &fi, bool &found)
 
   fi.iNode = de->d_ino;
   
-  #if !defined(_AIX)
+#if !defined(_AIX) && !defined(__sun)
   fi.Type = de->d_type;
   /* some systems (like CentOS 7.x on XFS) have (Type == DT_UNKNOWN)
      we can set (Type) from fstatat() in that case.
@@ -1161,7 +1367,7 @@ bool CEnumerator::NextAny(CDirEntry &fi, bool &found)
         fi.Type = DT_DIR;
   }
   */
-  #endif
+#endif
   
   /*
   if (de->d_type == DT_DIR)
@@ -1227,11 +1433,12 @@ bool CEnumerator::Fill_FileInfo(const CDirEntry &de, CFileInfo &fileInfo, bool f
   
   /*
   const FString path = _wildcard + s;
-  int res = MY__lstat(path, &st, followLink);
+  int res = MY_lstat(path, &st, followLink);
   */
   
   if (res != 0)
     return false;
+  // printf("\nname=%s\n", de.Name.Ptr());
   fileInfo.SetFrom_stat(st);
   fileInfo.Name = de.Name;
   return true;

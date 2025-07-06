@@ -2,8 +2,6 @@
 
 #include "StdAfx.h"
 
-#include "../../../../C/Sort.h"
-
 #include "../../../Common/StringConvert.h"
 
 #include "../../../Windows/FileDir.h"
@@ -43,6 +41,7 @@ static HRESULT DecompressArchive(
     const CExtractOptions &options,
     bool calcCrc,
     IExtractCallbackUI *callback,
+    IFolderArchiveExtractCallback *callbackFAE,
     CArchiveExtractCallback *ecs,
     UString &errorMessage,
     UInt64 &stdInProcessed)
@@ -94,7 +93,7 @@ static HRESULT DecompressArchive(
   if (!options.StdInMode)
   {
     UInt32 numItems;
-    RINOK(archive->GetNumberOfItems(&numItems));
+    RINOK(archive->GetNumberOfItems(&numItems))
     
     CReadArcItem item;
 
@@ -105,7 +104,7 @@ static HRESULT DecompressArchive(
           || options.ExcludeDirItems
           || options.ExcludeFileItems)
       {
-        RINOK(arc.GetItem(i, item));
+        RINOK(arc.GetItem(i, item))
         if (item.IsDir ? options.ExcludeDirItems : options.ExcludeFileItems)
           continue;
       }
@@ -115,7 +114,7 @@ static HRESULT DecompressArchive(
         item.IsAltStream = false;
         if (!options.NtOptions.AltStreams.Val && arc.Ask_AltStream)
         {
-          RINOK(Archive_IsItem_AltStream(arc.Archive, i, item.IsAltStream));
+          RINOK(Archive_IsItem_AltStream(arc.Archive, i, item.IsAltStream))
         }
         #endif
       }
@@ -194,11 +193,13 @@ static HRESULT DecompressArchive(
       options.NtOptions,
       options.StdInMode ? &wildcardCensor : NULL,
       &arc,
-      callback,
+      callbackFAE,
       options.StdOutMode, options.TestMode,
       outDir,
       removePathParts, false,
       packSize);
+
+  ecs->Is_elimPrefix_Mode = elimIsPossible;
 
   
   #ifdef SUPPORT_LINKS
@@ -207,14 +208,14 @@ static HRESULT DecompressArchive(
       !options.TestMode &&
       options.NtOptions.HardLinks.Val)
   {
-    RINOK(ecs->PrepareHardLinks(&realIndices));
+    RINOK(ecs->PrepareHardLinks(&realIndices))
   }
     
   #endif
 
   
   HRESULT result;
-  Int32 testMode = (options.TestMode && !calcCrc) ? 1: 0;
+  const Int32 testMode = (options.TestMode && !calcCrc) ? 1: 0;
 
   CArchiveExtractCallback_Closer ecsCloser(ecs);
 
@@ -226,9 +227,15 @@ static HRESULT DecompressArchive(
       ConvertPropVariantToUInt64(prop, stdInProcessed);
   }
   else
-    result = archive->Extract(&realIndices.Front(), realIndices.Size(), testMode, ecs);
+  {
+    // v23.02: we reset completed value that could be set by Open() operation
+    IArchiveExtractCallback *aec = ecs;
+    const UInt64 val = 0;
+    RINOK(aec->SetCompleted(&val))
+    result = archive->Extract(realIndices.ConstData(), realIndices.Size(), testMode, aec);
+  }
   
-  HRESULT res2 = ecsCloser.Close();
+  const HRESULT res2 = ecsCloser.Close();
   if (result == S_OK)
     result = res2;
 
@@ -239,18 +246,18 @@ static HRESULT DecompressArchive(
    Sorted list for file paths was sorted with case insensitive compare function.
    But FindInSorted function did binary search via case sensitive compare function */
 
-int Find_FileName_InSortedVector(const UStringVector &fileName, const UString &name);
-int Find_FileName_InSortedVector(const UStringVector &fileName, const UString &name)
+int Find_FileName_InSortedVector(const UStringVector &fileNames, const UString &name);
+int Find_FileName_InSortedVector(const UStringVector &fileNames, const UString &name)
 {
-  unsigned left = 0, right = fileName.Size();
+  unsigned left = 0, right = fileNames.Size();
   while (left != right)
   {
-    unsigned mid = (left + right) / 2;
-    const UString &midValue = fileName[mid];
-    int compare = CompareFileNames(name, midValue);
-    if (compare == 0)
+    const unsigned mid = (unsigned)(((size_t)left + (size_t)right) / 2);
+    const UString &midVal = fileNames[mid];
+    const int comp = CompareFileNames(name, midVal);
+    if (comp == 0)
       return (int)mid;
-    if (compare < 0)
+    if (comp < 0)
       right = mid;
     else
       left = mid + 1;
@@ -270,7 +277,8 @@ HRESULT Extract(
     const CExtractOptions &options,
     IOpenCallbackUI *openCallback,
     IExtractCallbackUI *extractCallback,
-    #ifndef _SFX
+    IFolderArchiveExtractCallback *faeCallback,
+    #ifndef Z7_SFX
     IHashCalc *hash,
     #endif
     UString &errorMessage,
@@ -314,17 +322,22 @@ HRESULT Extract(
 
   CArchiveExtractCallback *ecs = new CArchiveExtractCallback;
   CMyComPtr<IArchiveExtractCallback> ec(ecs);
-  bool multi = (numArcs > 1);
-  ecs->InitForMulti(multi, options.PathMode, options.OverwriteMode,
+  
+  const bool multi = (numArcs > 1);
+  
+  ecs->InitForMulti(multi,
+      options.PathMode,
+      options.OverwriteMode,
+      options.ZoneMode,
       false // keepEmptyDirParts
       );
-  #ifndef _SFX
+  #ifndef Z7_SFX
   ecs->SetHashMethods(hash);
   #endif
 
   if (multi)
   {
-    RINOK(extractCallback->SetTotal(totalPackSize));
+    RINOK(faeCallback->SetTotal(totalPackSize))
   }
 
   UInt64 totalPackProcessed = 0;
@@ -335,12 +348,17 @@ HRESULT Extract(
     if (skipArcs[i])
       continue;
 
+    ecs->InitBeforeNewArchive();
+
     const UString &arcPath = arcPaths[i];
     NFind::CFileInfo fi;
     if (options.StdInMode)
     {
-      fi.Size = 0;
-      fi.Attrib = 0;
+      // do we need ctime and mtime?
+      // fi.ClearBase();
+      // fi.Size = 0; // (UInt64)(Int64)-1;
+      if (!fi.SetAs_StdInFile())
+        return GetLastError_noZero_HRESULT();
     }
     else
     {
@@ -353,17 +371,17 @@ HRESULT Extract(
     }
 
     /*
-    #ifndef _NO_CRYPTO
+    #ifndef Z7_NO_CRYPTO
     openCallback->Open_Clear_PasswordWasAsked_Flag();
     #endif
     */
 
-    RINOK(extractCallback->BeforeOpen(arcPath, options.TestMode));
+    RINOK(extractCallback->BeforeOpen(arcPath, options.TestMode))
     CArchiveLink arcLink;
 
     CObjectVector<COpenType> types2 = types;
     /*
-    #ifndef _SFX
+    #ifndef Z7_SFX
     if (types.IsEmpty())
     {
       int pos = arcPath.ReverseFind(L'.');
@@ -371,7 +389,7 @@ HRESULT Extract(
       {
         UString s = arcPath.Ptr(pos + 1);
         int index = codecs->FindFormatForExtension(s);
-        if (index >= 0 && s == L"001")
+        if (index >= 0 && s.IsEqualTo("001"))
         {
           s = arcPath.Left(pos);
           pos = s.ReverseFind(L'.');
@@ -391,7 +409,7 @@ HRESULT Extract(
     */
 
     COpenOptions op;
-    #ifndef _SFX
+    #ifndef Z7_SFX
     op.props = &options.Properties;
     #endif
     op.codecs = codecs;
@@ -407,7 +425,7 @@ HRESULT Extract(
       return result;
 
     // arcLink.Set_ErrorsText();
-    RINOK(extractCallback->OpenResult(codecs, arcLink, arcPath, result));
+    RINOK(extractCallback->OpenResult(codecs, arcLink, arcPath, result))
 
     if (result != S_OK)
     {
@@ -416,6 +434,15 @@ HRESULT Extract(
         totalPackProcessed += fi.Size;
       continue;
     }
+
+   #if defined(_WIN32) && !defined(UNDER_CE) && !defined(Z7_SFX)
+    if (options.ZoneMode != NExtract::NZoneIdMode::kNone
+        && !options.StdInMode)
+    {
+      ReadZoneFile_Of_BaseFile(us2fs(arcPath), ecs->ZoneBuf);
+    }
+   #endif
+    
 
     if (arcLink.Arcs.Size() != 0)
     {
@@ -426,7 +453,13 @@ HRESULT Extract(
           /* real Extracting to files is possible.
              But user can think that hash archive contains real files.
              So we block extracting here. */
-          return E_NOTIMPL;
+          // v23.00 : we don't break process.
+          RINOK(extractCallback->OpenResult(codecs, arcLink, arcPath, E_NOTIMPL))
+          thereAreNotOpenArcs = true;
+          if (!options.StdInMode)
+            totalPackProcessed += fi.Size;
+          continue;
+          // return E_NOTIMPL; // before v23
         }
         FString dirPrefix = us2fs(options.HashDir);
         if (dirPrefix.IsEmpty())
@@ -470,7 +503,7 @@ HRESULT Extract(
           if (newPackSize < 0)
             newPackSize = 0;
           totalPackSize = (UInt64)newPackSize;
-          RINOK(extractCallback->SetTotal(totalPackSize));
+          RINOK(faeCallback->SetTotal(totalPackSize))
         }
       }
     }
@@ -478,24 +511,29 @@ HRESULT Extract(
     /*
     // Now openCallback and extractCallback use same object. So we don't need to send password.
 
-    #ifndef _NO_CRYPTO
+    #ifndef Z7_NO_CRYPTO
     bool passwordIsDefined;
     UString password;
-    RINOK(openCallback->Open_GetPasswordIfAny(passwordIsDefined, password));
+    RINOK(openCallback->Open_GetPasswordIfAny(passwordIsDefined, password))
     if (passwordIsDefined)
     {
-      RINOK(extractCallback->SetPassword(password));
+      RINOK(extractCallback->SetPassword(password))
     }
     #endif
     */
 
     CArc &arc = arcLink.Arcs.Back();
-    arc.MTimeDefined = (!options.StdInMode && !fi.IsDevice);
-    arc.MTime = fi.MTime;
+    arc.MTime.Def = !options.StdInMode
+        #ifdef _WIN32
+        && !fi.IsDevice
+        #endif
+        ;
+    if (arc.MTime.Def)
+      arc.MTime.Set_From_FiTime(fi.MTime);
 
     UInt64 packProcessed;
-    bool calcCrc =
-        #ifndef _SFX
+    const bool calcCrc =
+        #ifndef Z7_SFX
           (hash != NULL);
         #else
           false;
@@ -508,7 +546,8 @@ HRESULT Extract(
         wildcardCensor,
         options,
         calcCrc,
-        extractCallback, ecs, errorMessage, packProcessed));
+        extractCallback, faeCallback, ecs,
+        errorMessage, packProcessed))
 
     if (!options.StdInMode)
       packProcessed = fi.Size + arcLink.VolumesSize;
@@ -521,8 +560,8 @@ HRESULT Extract(
 
   if (multi || thereAreNotOpenArcs)
   {
-    RINOK(extractCallback->SetTotal(totalPackSize));
-    RINOK(extractCallback->SetCompleted(&totalPackProcessed));
+    RINOK(faeCallback->SetTotal(totalPackSize))
+    RINOK(faeCallback->SetCompleted(&totalPackProcessed))
   }
 
   st.NumFolders = ecs->NumFolders;

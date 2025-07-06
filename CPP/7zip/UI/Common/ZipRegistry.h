@@ -1,7 +1,7 @@
 // ZipRegistry.h
 
-#ifndef __ZIP_REGISTRY_H
-#define __ZIP_REGISTRY_H
+#ifndef ZIP7_INC_ZIP_REGISTRY_H
+#define ZIP7_INC_ZIP_REGISTRY_H
 
 #include "../../../Common/MyTypes.h"
 #include "../../../Common/MyString.h"
@@ -9,6 +9,16 @@
 #include "../../Common/MethodProps.h"
 
 #include "ExtractMode.h"
+
+/*
+CBoolPair::Def in writing functions means:
+  if (  CBoolPair::Def ), we write CBoolPair::Val
+  if ( !CBoolPair::Def )
+  {
+    in NCompression functions we delete registry value
+    in another functions we do nothing
+  }
+*/
 
 namespace NExtract
 {
@@ -33,6 +43,9 @@ namespace NExtract
   
   void Save_ShowPassword(bool showPassword);
   bool Read_ShowPassword();
+
+  void Save_LimitGB(UInt32 limit_GB);
+  UInt32 Read_LimitGB();
 }
 
 namespace NCompression
@@ -71,15 +84,33 @@ namespace NCompression
   {
     UInt32 Level;
     UInt32 Dictionary;
+    // UInt32 DictionaryChain;
     UInt32 Order;
     UInt32 BlockLogSize;
     UInt32 NumThreads;
     
+    UInt32 TimePrec;
+    CBoolPair MTime;
+    CBoolPair ATime;
+    CBoolPair CTime;
+    CBoolPair SetArcMTime;
+
     CSysString FormatID;
     UString Method;
     UString Options;
     UString EncryptionMethod;
     UString MemUse;
+
+    void Reset_TimePrec()
+    {
+      TimePrec = (UInt32)(Int32)-1;
+    }
+
+    bool IsSet_TimePrec() const
+    {
+      return TimePrec != (UInt32)(Int32)-1;
+    }
+
 
     void Reset_BlockLogSize()
     {
@@ -89,11 +120,17 @@ namespace NCompression
     void ResetForLevelChange()
     {
       BlockLogSize = NumThreads = Level = Dictionary = Order = (UInt32)(Int32)-1;
+      // DictionaryChain = (UInt32)(Int32)-1;
       Method.Empty();
       // Options.Empty();
       // EncryptionMethod.Empty();
     }
-    CFormatOptions() { ResetForLevelChange(); }
+    CFormatOptions()
+    {
+      // TimePrec = 0;
+      Reset_TimePrec();
+      ResetForLevelChange();
+    }
   };
 
   struct CInfo
@@ -101,15 +138,18 @@ namespace NCompression
     UInt32 Level;
     bool ShowPassword;
     bool EncryptHeaders;
-    UString ArcType;
-    UStringVector ArcPaths;
-
-    CObjectVector<CFormatOptions> Formats;
 
     CBoolPair NtSecurity;
     CBoolPair AltStreams;
     CBoolPair HardLinks;
     CBoolPair SymLinks;
+
+    CBoolPair PreserveATime;
+
+    UString ArcType;
+    UStringVector ArcPaths;
+
+    CObjectVector<CFormatOptions> Formats;
 
     void Save() const;
     void Load();
@@ -130,8 +170,8 @@ namespace NWorkDir
   struct CInfo
   {
     NMode::EEnum Mode;
-    FString Path;
     bool ForRemovableOnly;
+    FString Path;
 
     void SetForRemovableOnlyDefault() { ForRemovableOnly = true; }
     void SetDefault()
@@ -152,9 +192,18 @@ struct CContextMenuInfo
   CBoolPair Cascaded;
   CBoolPair MenuIcons;
   CBoolPair ElimDup;
-
+  
   bool Flags_Def;
   UInt32 Flags;
+  UInt32 WriteZone;
+
+  /*
+  CContextMenuInfo():
+      Flags_Def(0),
+      WriteZone((UInt32)(Int32)-1),
+      Flags((UInt32)(Int32)-1)
+      {}
+  */
 
   void Save() const;
   void Load();

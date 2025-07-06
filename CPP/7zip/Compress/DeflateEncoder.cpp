@@ -14,17 +14,21 @@
 #undef NO_INLINE
 
 #ifdef _MSC_VER
-#define NO_INLINE MY_NO_INLINE
+#define NO_INLINE Z7_NO_INLINE
 #else
 #define NO_INLINE
 #endif
+
+#define MAX_HUF_LEN_12  12
 
 namespace NCompress {
 namespace NDeflate {
 namespace NEncoder {
 
+static const unsigned k_CodeValue_Len_Is_Literal_Flag = 1u << 15;
+
 static const unsigned kNumDivPassesMax = 10; // [0, 16); ratio/speed/ram tradeoff; use big value for better compression ratio.
-static const UInt32 kNumTables = (1 << kNumDivPassesMax);
+static const unsigned kNumTables = 1u << kNumDivPassesMax;
 
 static const UInt32 kFixedHuffmanCodeBlockSizeMax = (1 << 8); // [0, (1 << 32)); ratio/speed tradeoff; use big value for better compression ratio.
 static const UInt32 kDivideCodeBlockSizeMin = (1 << 7); // [1, (1 << 32)); ratio/speed tradeoff; use small value for better compression ratio.
@@ -43,9 +47,11 @@ static const Byte kNoLiteralStatPrice = 11;
 static const Byte kNoLenStatPrice = 11;
 static const Byte kNoPosStatPrice = 6;
 
+MY_ALIGN(64)
 static Byte g_LenSlots[kNumLenSymbolsMax];
 
 #define kNumLogBits 9    // do not change it
+MY_ALIGN(64)
 static Byte g_FastPos[1 << kNumLogBits];
 
 class CFastPosInit
@@ -57,7 +63,7 @@ public:
     for (i = 0; i < kNumLenSlots; i++)
     {
       unsigned c = kLenStart32[i];
-      unsigned j = 1 << kLenDirectBits32[i];
+      const unsigned j = 1u << kLenDirectBits32[i];
       for (unsigned k = 0; k < j; k++, c++)
         g_LenSlots[c] = (Byte)i;
     }
@@ -66,8 +72,8 @@ public:
     unsigned c = 0;
     for (Byte slotFast = 0; slotFast < kFastSlots; slotFast++)
     {
-      UInt32 k = (1 << kDistDirectBits[slotFast]);
-      for (UInt32 j = 0; j < k; j++, c++)
+      const unsigned k = 1u << kDistDirectBits[slotFast];
+      for (unsigned j = 0; j < k; j++, c++)
         g_FastPos[c] = slotFast;
     }
   }
@@ -75,7 +81,7 @@ public:
 
 static CFastPosInit g_FastPosInit;
 
-inline UInt32 GetPosSlot(UInt32 pos)
+inline unsigned GetPosSlot(UInt32 pos)
 {
   /*
   if (pos < 0x200)
@@ -158,34 +164,34 @@ CCoder::CCoder(bool deflate64Mode):
 HRESULT CCoder::Create()
 {
   // COM_TRY_BEGIN
-  if (m_Values == 0)
+  if (!m_Values)
   {
-    m_Values = (CCodeValue *)MyAlloc((kMaxUncompressedBlockSize) * sizeof(CCodeValue));
-    if (m_Values == 0)
+    m_Values = (CCodeValue *)MyAlloc(kMaxUncompressedBlockSize * sizeof(CCodeValue));
+    if (!m_Values)
       return E_OUTOFMEMORY;
   }
-  if (m_Tables == 0)
+  if (!m_Tables)
   {
-    m_Tables = (CTables *)MyAlloc((kNumTables) * sizeof(CTables));
-    if (m_Tables == 0)
+    m_Tables = (CTables *)MyAlloc(kNumTables * sizeof(CTables));
+    if (!m_Tables)
       return E_OUTOFMEMORY;
   }
 
   if (m_IsMultiPass)
   {
-    if (m_OnePosMatchesMemory == 0)
+    if (!m_OnePosMatchesMemory)
     {
       m_OnePosMatchesMemory = (UInt16 *)::MidAlloc(kMatchArraySize * sizeof(UInt16));
-      if (m_OnePosMatchesMemory == 0)
+      if (!m_OnePosMatchesMemory)
         return E_OUTOFMEMORY;
     }
   }
   else
   {
-    if (m_DistanceMemory == 0)
+    if (!m_DistanceMemory)
     {
       m_DistanceMemory = (UInt16 *)MyAlloc((kMatchMaxLen + 2) * 2 * sizeof(UInt16));
-      if (m_DistanceMemory == 0)
+      if (!m_DistanceMemory)
         return E_OUTOFMEMORY;
       m_MatchDistances = m_DistanceMemory;
     }
@@ -195,10 +201,11 @@ HRESULT CCoder::Create()
   {
     _lzInWindow.btMode = (Byte)(_btMode ? 1 : 0);
     _lzInWindow.numHashBytes = 3;
+    _lzInWindow.numHashBytes_Min = 3;
     if (!MatchFinder_Create(&_lzInWindow,
         m_Deflate64Mode ? kHistorySize64 : kHistorySize32,
         kNumOpts + kMaxUncompressedBlockSize,
-        m_NumFastBytes, m_MatchMaxLen - m_NumFastBytes, &g_Alloc))
+        m_NumFastBytes, m_MatchMaxLen - m_NumFastBytes, &g_AlignedAlloc))
       return E_OUTOFMEMORY;
     if (!m_OutStream.Create(1 << 20))
       return E_OUTOFMEMORY;
@@ -239,16 +246,16 @@ HRESULT CCoder::BaseSetEncoderProperties2(const PROPID *propIDs, const PROPVARIA
   
 void CCoder::Free()
 {
-  ::MidFree(m_OnePosMatchesMemory); m_OnePosMatchesMemory = 0;
-  ::MyFree(m_DistanceMemory); m_DistanceMemory = 0;
-  ::MyFree(m_Values); m_Values = 0;
-  ::MyFree(m_Tables); m_Tables = 0;
+  ::MidFree(m_OnePosMatchesMemory); m_OnePosMatchesMemory = NULL;
+  ::MyFree(m_DistanceMemory); m_DistanceMemory = NULL;
+  ::MyFree(m_Values); m_Values = NULL;
+  ::MyFree(m_Tables); m_Tables = NULL;
 }
 
 CCoder::~CCoder()
 {
   Free();
-  MatchFinder_Free(&_lzInWindow, &g_Alloc);
+  MatchFinder_Free(&_lzInWindow, &g_AlignedAlloc);
 }
 
 NO_INLINE void CCoder::GetMatches()
@@ -265,19 +272,21 @@ NO_INLINE void CCoder::GetMatches()
 
   UInt32 distanceTmp[kMatchMaxLen * 2 + 3];
   
-  const UInt32 numPairs = (UInt32)((_btMode ?
+  const size_t numPairs = (size_t)((_btMode ?
       Bt3Zip_MatchFinder_GetMatches(&_lzInWindow, distanceTmp):
       Hc3Zip_MatchFinder_GetMatches(&_lzInWindow, distanceTmp)) - distanceTmp);
 
-  *m_MatchDistances = (UInt16)numPairs;
+  UInt16 *matchDistances = m_MatchDistances;
+  *matchDistances++ = (UInt16)numPairs;
    
   if (numPairs != 0)
   {
-    UInt32 i;
+    size_t i;
     for (i = 0; i < numPairs; i += 2)
     {
-      m_MatchDistances[(size_t)i + 1] = (UInt16)distanceTmp[i];
-      m_MatchDistances[(size_t)i + 2] = (UInt16)distanceTmp[(size_t)i + 1];
+      matchDistances[0] = (UInt16)distanceTmp[i];
+      matchDistances[1] = (UInt16)distanceTmp[(size_t)i + 1];
+      matchDistances += 2;
     }
     UInt32 len = distanceTmp[(size_t)numPairs - 2];
     if (len == m_NumFastBytes && m_NumFastBytes != m_MatchMaxLen)
@@ -288,11 +297,11 @@ NO_INLINE void CCoder::GetMatches()
       if (numAvail > m_MatchMaxLen)
         numAvail = m_MatchMaxLen;
       for (; len < numAvail && pby[len] == pby2[len]; len++);
-      m_MatchDistances[(size_t)i - 1] = (UInt16)len;
+      matchDistances[-2] = (UInt16)len;
     }
   }
   if (m_IsMultiPass)
-    m_Pos += numPairs + 1;
+    m_Pos += (UInt32)numPairs + 1;
   if (!m_SecondPass)
     m_AdditionalOffset++;
 }
@@ -532,6 +541,7 @@ NO_INLINE void CCoder::WriteBits(UInt32 value, unsigned numBits)
 }
 
 #define WRITE_HF2(codes, lens, i) m_OutStream.WriteBits(codes[i], lens[i])
+#define WRITE_HF2_NO_INLINE(codes, lens, i)   WriteBits(codes[i], lens[i])
 #define WRITE_HF(i) WriteBits(codes[i], lens[i])
 
 NO_INLINE void CCoder::LevelTableCode(const Byte *levels, unsigned numLevels, const Byte *lens, const UInt32 *codes)
@@ -616,17 +626,22 @@ static NO_INLINE UInt32 Huffman_GetPrice(const UInt32 *freqs, const Byte *lens, 
   return price;
 }
 
-static NO_INLINE UInt32 Huffman_GetPrice_Spec(const UInt32 *freqs, const Byte *lens, UInt32 num, const Byte *extraBits, UInt32 extraBase)
+static NO_INLINE UInt32 Huffman_GetPrice_Spec(
+    const UInt32 *freqs, const Byte *lens, UInt32 num,
+    const Byte *extraBits, UInt32 extraBase)
 {
-  return Huffman_GetPrice(freqs, lens, num) +
+  return
+    Huffman_GetPrice(freqs, lens, num) +
     Huffman_GetPrice(freqs + extraBase, extraBits, num - extraBase);
 }
 
 NO_INLINE UInt32 CCoder::GetLzBlockPrice() const
 {
   return
-    Huffman_GetPrice_Spec(mainFreqs, m_NewLevels.litLenLevels, kFixedMainTableSize, m_LenDirectBits, kSymbolMatch) +
-    Huffman_GetPrice_Spec(distFreqs, m_NewLevels.distLevels, kDistTableSize64, kDistDirectBits, 0);
+    Huffman_GetPrice_Spec(mainFreqs, m_NewLevels.litLenLevels,
+        kFixedMainTableSize, m_LenDirectBits, kSymbolMatch) +
+    Huffman_GetPrice_Spec(distFreqs, m_NewLevels.distLevels,
+        kDistTableSize64, kDistDirectBits, 0);
 }
 
 NO_INLINE void CCoder::TryBlock()
@@ -655,7 +670,7 @@ NO_INLINE void CCoder::TryBlock()
     CCodeValue &codeValue = m_Values[m_ValueIndex++];
     if (len >= kMatchMinLen)
     {
-      UInt32 newLen = len - kMatchMinLen;
+      const UInt32 newLen = len - kMatchMinLen;
       codeValue.Len = (UInt16)newLen;
       mainFreqs[kSymbolMatch + (size_t)g_LenSlots[newLen]]++;
       codeValue.Pos = (UInt16)pos;
@@ -663,10 +678,10 @@ NO_INLINE void CCoder::TryBlock()
     }
     else
     {
-      Byte b = *(Inline_MatchFinder_GetPointerToCurrentPos(&_lzInWindow) - m_AdditionalOffset);
+      const unsigned b = *(Inline_MatchFinder_GetPointerToCurrentPos(&_lzInWindow) - m_AdditionalOffset);
       mainFreqs[b]++;
-      codeValue.SetAsLiteral();
-      codeValue.Pos = b;
+      codeValue.Len = k_CodeValue_Len_Is_Literal_Flag;
+      codeValue.Pos = (UInt16)b;
     }
     m_AdditionalOffset -= len;
     BlockSizeRes += len;
@@ -701,16 +716,24 @@ NO_INLINE void CCoder::SetPrices(const CLevels &levels)
   }
 }
 
+#if MAX_HUF_LEN_12 > 12
+// Huffman_ReverseBits() now supports 12-bits values only.
+#error Stop_Compiling_Bad_MAX_HUF_LEN_12
+#endif
 static NO_INLINE void Huffman_ReverseBits(UInt32 *codes, const Byte *lens, UInt32 num)
 {
-  for (UInt32 i = 0; i < num; i++)
+  const Byte * const lens_lim = lens + num;
+  do
   {
-    UInt32 x = codes[i];
-    x = ((x & 0x5555) << 1) | ((x & 0xAAAA) >> 1);
-    x = ((x & 0x3333) << 2) | ((x & 0xCCCC) >> 2);
-    x = ((x & 0x0F0F) << 4) | ((x & 0xF0F0) >> 4);
-    codes[i] = (((x & 0x00FF) << 8) | ((x & 0xFF00) >> 8)) >> (16 - lens[i]);
+    // we should change constants, if lens[*] can be larger than 12.
+    UInt32 x = *codes;
+    x = ((x & (0x555     )) << 2) + (x & (0xAAA     ));
+    x = ((x & (0x333 << 1)) << 4) | (x & (0xCCC << 1));
+    x = ((x & (0xF0F << 3)) << 8) | (x & (0x0F0 << 3));
+    // we can use (x) instead of (x & (0xFF << 7)), if we support garabage data after (*lens) bits.
+    *codes++ = (((x & (0xFF << 7)) << 16) | x) >> (*lens ^ 31);
   }
+  while (++lens != lens_lim);
 }
 
 NO_INLINE void CCoder::WriteBlock()
@@ -718,24 +741,28 @@ NO_INLINE void CCoder::WriteBlock()
   Huffman_ReverseBits(mainCodes, m_NewLevels.litLenLevels, kFixedMainTableSize);
   Huffman_ReverseBits(distCodes, m_NewLevels.distLevels, kDistTableSize64);
 
-  for (UInt32 i = 0; i < m_ValueIndex; i++)
+  CCodeValue *values = m_Values;
+  const CCodeValue * const values_lim = values + m_ValueIndex;
+
+  if (values != values_lim)
+  do
   {
-    const CCodeValue &codeValue = m_Values[i];
-    if (codeValue.IsLiteral())
-      WRITE_HF2(mainCodes, m_NewLevels.litLenLevels, codeValue.Pos);
+    const UInt32 len = values->Len;
+    const UInt32 dist = values->Pos;
+    if (len == k_CodeValue_Len_Is_Literal_Flag)
+      WRITE_HF2(mainCodes, m_NewLevels.litLenLevels, dist);
     else
     {
-      UInt32 len = codeValue.Len;
-      UInt32 lenSlot = g_LenSlots[len];
+      const unsigned lenSlot = g_LenSlots[len];
       WRITE_HF2(mainCodes, m_NewLevels.litLenLevels, kSymbolMatch + lenSlot);
       m_OutStream.WriteBits(len - m_LenStart[lenSlot], m_LenDirectBits[lenSlot]);
-      UInt32 dist = codeValue.Pos;
-      UInt32 posSlot = GetPosSlot(dist);
+      const unsigned posSlot = GetPosSlot(dist);
       WRITE_HF2(distCodes, m_NewLevels.distLevels, posSlot);
       m_OutStream.WriteBits(dist - kDistStart[posSlot], kDistDirectBits[posSlot]);
     }
   }
-  WRITE_HF2(mainCodes, m_NewLevels.litLenLevels, kSymbolEndOfBlock);
+  while (++values != values_lim);
+  WRITE_HF2_NO_INLINE(mainCodes, m_NewLevels.litLenLevels, kSymbolEndOfBlock);
 }
 
 static UInt32 GetStorePrice(UInt32 blockSize, unsigned bitPosition)
@@ -784,10 +811,10 @@ NO_INLINE UInt32 CCoder::TryDynBlock(unsigned tableIndex, UInt32 numPasses)
   {
     m_Pos = posTemp;
     TryBlock();
-    unsigned numHuffBits =
-        (m_ValueIndex > 18000 ? 12 :
-        (m_ValueIndex >  7000 ? 11 :
-        (m_ValueIndex >  2000 ? 10 : 9)));
+    const unsigned numHuffBits =
+        m_ValueIndex > 18000 ? MAX_HUF_LEN_12 :
+        m_ValueIndex >  7000 ? 11 :
+        m_ValueIndex >  2000 ? 10 : 9;
     MakeTables(numHuffBits);
     SetPrices(m_NewLevels);
   }
@@ -945,17 +972,19 @@ HRESULT CCoder::CodeReal(ISequentialInStream *inStream, ISequentialOutStream *ou
   m_CheckStatic = (m_NumPasses != 1 || m_NumDivPasses != 1);
   m_IsMultiPass = (m_CheckStatic || (m_NumPasses != 1 || m_NumDivPasses != 1));
 
-  RINOK(Create());
+  /* we can set stream mode before MatchFinder_Create
+    if default MatchFinder mode was not STREAM_MODE) */
+  // MatchFinder_SET_STREAM_MODE(&_lzInWindow);
+
+  CSeqInStreamWrap _seqInStream;
+  _seqInStream.Init(inStream);
+  MatchFinder_SET_STREAM(&_lzInWindow, &_seqInStream.vt)
+
+  RINOK(Create())
 
   m_ValueBlockSize = (7 << 10) + (1 << 12) * m_NumDivPasses;
 
   UInt64 nowPos = 0;
-
-  CSeqInStreamWrap _seqInStream;
-  
-  _seqInStream.Init(inStream);
-
-  _lzInWindow.stream = &_seqInStream.vt;
 
   MatchFinder_Init(&_lzInWindow);
   m_OutStream.SetStream(outStream);
@@ -978,7 +1007,7 @@ HRESULT CCoder::CodeReal(ISequentialInStream *inStream, ISequentialOutStream *ou
     if (progress != NULL)
     {
       UInt64 packSize = m_OutStream.GetProcessedSize();
-      RINOK(progress->SetRatioInfo(&nowPos, &packSize));
+      RINOK(progress->SetRatioInfo(&nowPos, &packSize))
     }
   }
   while (Inline_MatchFinder_GetNumAvailableBytes(&_lzInWindow) != 0);
@@ -999,18 +1028,18 @@ HRESULT CCoder::BaseCode(ISequentialInStream *inStream, ISequentialOutStream *ou
   catch(...) { return E_FAIL; }
 }
 
-STDMETHODIMP CCOMCoder::Code(ISequentialInStream *inStream, ISequentialOutStream *outStream,
-    const UInt64 *inSize, const UInt64 *outSize, ICompressProgressInfo *progress)
+Z7_COM7F_IMF(CCOMCoder::Code(ISequentialInStream *inStream, ISequentialOutStream *outStream,
+    const UInt64 *inSize, const UInt64 *outSize, ICompressProgressInfo *progress))
   { return BaseCode(inStream, outStream, inSize, outSize, progress); }
 
-STDMETHODIMP CCOMCoder::SetCoderProperties(const PROPID *propIDs, const PROPVARIANT *props, UInt32 numProps)
+Z7_COM7F_IMF(CCOMCoder::SetCoderProperties(const PROPID *propIDs, const PROPVARIANT *props, UInt32 numProps))
   { return BaseSetEncoderProperties2(propIDs, props, numProps); }
 
-STDMETHODIMP CCOMCoder64::Code(ISequentialInStream *inStream, ISequentialOutStream *outStream,
-    const UInt64 *inSize, const UInt64 *outSize, ICompressProgressInfo *progress)
+Z7_COM7F_IMF(CCOMCoder64::Code(ISequentialInStream *inStream, ISequentialOutStream *outStream,
+    const UInt64 *inSize, const UInt64 *outSize, ICompressProgressInfo *progress))
   { return BaseCode(inStream, outStream, inSize, outSize, progress); }
 
-STDMETHODIMP CCOMCoder64::SetCoderProperties(const PROPID *propIDs, const PROPVARIANT *props, UInt32 numProps)
+Z7_COM7F_IMF(CCOMCoder64::SetCoderProperties(const PROPID *propIDs, const PROPVARIANT *props, UInt32 numProps))
   { return BaseSetEncoderProperties2(propIDs, props, numProps); }
 
 }}}

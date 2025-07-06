@@ -1,17 +1,18 @@
-7-Zip 21.07 Sources
+7-Zip 25.00 Sources
 -------------------
 
 7-Zip is a file archiver for Windows. 
 
-7-Zip Copyright (C) 1999-2021 Igor Pavlov.
+7-Zip Copyright (C) 1999-2025 Igor Pavlov.
 
 
 License Info
 ------------
 
 7-Zip is free software distributed under the GNU LGPL 
-(except for unRar code).
-read License.txt for more infomation about license.
+(except for unRar code). Also some  code
+is licensed under the "BSD 3-clause License".
+Read "License.txt" for more infomation about license.
 
 Notes about unRAR license:
 
@@ -46,13 +47,11 @@ How to compile in Windows
 -------------------------
 
 To compile the sources to Windows binaries you need Visual Studio compiler and/or Windows SDK.
-You can use latest Windows Studio 2017/2019 to compile binaries for x86, x64 and arm64 platforms.
+You can use latest Windows Studio 2017/2019/2022 to compile binaries for x86, x64, arm64 and arm platforms.
 Also you can use old compilers for some platforms:
   x86   : Visual C++ 6.0 with Platform SDK
   x64   : Windows Server 2003 R2 Platform SDK
-  arm64 : Windows Studio 2017
-  arm   : Windows Studio 2017
-  ia64 (itanium)     : Windows Server 2003 R2 Platform SDK
+  ia64 (itanium)  : Windows Server 2003 R2 Platform SDK
   arm for Windows CE : Standard SDK for Windows CE 5.0
 
 If you use MSVC6, specify also Platform SDK directories at top of directories lists:
@@ -70,12 +69,12 @@ There are two ways to compile 7-Zip binaries:
 2) via dsp file in Visual Studio.
 
 The dsp file compiling can be used for development and debug purposes.
-The final 7-Zip binaries are compiled via makefiles, that provide best 
+All final 7-Zip binaries are compiled via makefiles, that provide best
 optimization options.
 
 
-How to compile with makefile
-----------------------------
+How to compile with makefile in Windows
+---------------------------------------
 
 Some macronames can be defined for compiling with makefile:
 
@@ -89,33 +88,53 @@ MY_DYNAMIC_LINK
   for dynamic linking to the run-time library (msvcrt.dll). 
   The default makefile option is static linking to the run-time library.
 
+To compile all 7-Zip files for x64 with Visual Studio 2022,
+use the following command sequence:
+
+  cd SRC\CPP\7zip
+  %comspec% /k "C:\Program Files\VS2022\VC\Auxiliary\Build\vcvars64.bat"
+  nmake
+
+You can use another "vcvars*.bat" files from "VS2022\VC\Auxiliary\Build" directory
+to compile for other platforms:
+  vcvars64.bat
+  vcvarsamd64_arm64.bat
+  vcvarsamd64_x86.bat
+
+Also you can compile single binary from directory with related project.
+For example, to compile 7za.exe, use the following command sequence:
+  cd SRC\CPP\7zip\Bundles\Alone\
+  nmake
 
 
 Compiling 7-Zip for Unix/Linux
 ------------------------------
 
-There are several otpions to compile 7-Zip with different compilers: gcc and clang.
-Also 7-Zip code contains two versions for some critical parts of code: in C and in Assembeler.
+There are several options to compile 7-Zip with different compilers: gcc and clang.
+Also 7-Zip code contains two versions for some parts of code: in C and in Assembeler.
 So if you compile the version with Assembeler code, you will get faster 7-Zip binary.
 
 7-Zip's assembler code uses the following syntax for different platforms:
 
 1) x86 and x86-64 (AMD64): MASM syntax. 
-   There are 2 programs that supports MASM syntax in Linux.
-'    'Asmc Macro Assembler and JWasm. But JWasm now doesn't support some 
+   Now there are 3 programs that supports MASM syntax in Linux.
+'    'Asmc Macro Assembler, JWasm, and UASM. Note that JWasm now doesn't support some 
       cpu instructions used in 7-Zip.
-   So you must install Asmc Macro Assembler in Linux, if you want to compile fastest version
-   of 7-Zip  x86 and x86-64:
+   So you must install Asmc Macro Assembler in Linux or UASM, if you want to compile 
+   fastest version of 7-Zip  x86 and x86-64:
      https://github.com/nidud/asmc
+     https://github.com/Terraspace/UASM
+
 
 2) arm64: GNU assembler for ARM64 with preprocessor. 
-   That systax of that arm64 assembler code in 7-Zip is supported by GCC and CLANG for ARM64.
+   That systax is supported by GCC and CLANG for ARM64.
 
 There are different binaries that can be compiled from 7-Zip source.
 There are 2 main files in folder for compiling:
   makefile        - that can be used for compiling Windows version of 7-Zip with nmake command
-  makefile.gcc    - that can be used for compiling Linux/macOS versions of 7-Zip with make command
-
+  makefile.gcc    - that can be used for compiling Linux/macOS versions of 7-Zip or Windows version 
+                    with MINGW (GCC) with make command.
+                   
 At first you must change the current folder to folder that contains `makefile.gcc`:
 
   cd CPP/7zip/Bundles/Alone2
@@ -143,7 +162,7 @@ To compile 7-Zip for arm64 with assembler:
 To compile 7-Zip for arm64 for macOS:
   make -j -f ../../cmpl_mac_arm64.mak
 
-Also you can change some compiler options in the mak files:
+Also you can change some compiler options in the "mak" files:
   cmpl_gcc.mak
   var_gcc.mak
   warn_gcc.mak
@@ -154,6 +173,13 @@ USE_JWASM=1
   use JWasm assembler instead of Asmc.
   Note that JWasm doesn't support AES instructions. So AES code from C version AesOpt.c 
   will be used instead of assembler code from AesOpt.asm.
+
+If you want to use UASM for x86-64 compiling, you can change 7zip_gcc.mak, 
+or send IS_X64=1 USE_ASM=1 MY_ASM="$UASM" to make command calling:
+  UASM="$PWD/GccUnixR/uasm"
+  cd "7zip-src/CPP/7zip/Bundles/Alone2"
+  make -f makefile.gcc -j IS_X64=1 USE_ASM=1 MY_ASM="$UASM"
+
 
 DISABLE_RAR=1
   removes whole RAR related code from compilation.
@@ -207,16 +233,17 @@ Description of 7-Zip sources package
 
 DOC                Documentation
 ---
+  readme.txt     - Readme file
+  src-history.txt  - Sources history
+  7zC.txt        - 7z ANSI-C Decoder description
   7zFormat.txt   - 7z format description
+  Methods.txt    - Compression method IDs
+  lzma.txt       - LZMA compression description
+  License.txt    - license information
   copying.txt    - GNU LGPL license
   unRarLicense.txt - License for unRAR part of source code
-  src-history.txt  - Sources history
-  Methods.txt    - Compression method IDs
-  readme.txt     - Readme file
-  lzma.txt       - LZMA compression description
-  7zip.nsi       - installer script for NSIS
-  7zip.wix       - installer script for WIX
-
+  7zip.wxs       - installer script for WIX
+  7zip.hhp       - html help project file
 
 Asm - Source code in Assembler : optimized code for CRC, SHA, AES, LZMA decoding.
 
@@ -250,9 +277,9 @@ Windows           common files for Windows related code
     SFXWin        7z.sfx: Windows 7z SFX module
     SFXSetup      7zS.sfx: Windows 7z SFX module for Installers
 
-  Compress        files for compression/decompression
+  Compress        files for compression / decompression
 
-  Crypto          files for encryption / decompression
+  Crypto          files for encryption / decryption
 
   UI
 

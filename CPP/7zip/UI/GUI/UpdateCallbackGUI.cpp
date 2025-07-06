@@ -51,7 +51,7 @@ HRESULT CUpdateCallbackGUI::StartScanning()
 HRESULT CUpdateCallbackGUI::ScanError(const FString &path, DWORD systemError)
 {
   FailedFiles.Add(path);
-  ProgressDialog->Sync.AddError_Code_Name(systemError, fs2us(path));
+  ProgressDialog->Sync.AddError_Code_Name(HRESULT_FROM_WIN32(systemError), fs2us(path));
   return S_OK;
 }
 
@@ -59,7 +59,7 @@ HRESULT CUpdateCallbackGUI::FinishScanning(const CDirItemsStat &st)
 {
   CProgressSync &sync = ProgressDialog->Sync;
   RINOK(ProgressDialog->Sync.ScanProgress(st.NumFiles + st.NumAltStreams,
-      st.GetTotalBytes(), FString(), true));
+      st.GetTotalBytes(), FString(), true))
   sync.Set_Status(L"");
   return S_OK;
 }
@@ -130,7 +130,7 @@ HRESULT CUpdateCallbackGUI::OpenFileError(const FString &path, DWORD systemError
   FailedFiles.Add(path);
   // if (systemError == ERROR_SHARING_VIOLATION)
   {
-    ProgressDialog->Sync.AddError_Code_Name(systemError, fs2us(path));
+    ProgressDialog->Sync.AddError_Code_Name(HRESULT_FROM_WIN32(systemError), fs2us(path));
     return S_FALSE;
   }
   // return systemError;
@@ -209,7 +209,7 @@ HRESULT CUpdateCallbackGUI::Open_SetCompleted(const UInt64 * /* numFiles */, con
   return ProgressDialog->Sync.CheckStop();
 }
 
-#ifndef _NO_CRYPTO
+#ifndef Z7_NO_CRYPTO
 
 HRESULT CUpdateCallbackGUI::Open_CryptoGetTextPassword(BSTR *password)
 {
@@ -252,6 +252,21 @@ HRESULT CUpdateCallbackGUI::DeletingAfterArchiving(const FString &path, bool isD
   return ProgressDialog->Sync.Set_Status2(_lang_Removing, fs2us(path), isDir);
 }
 
+
+HRESULT CUpdateCallbackGUI::MoveArc_Start(const wchar_t *srcTempPath, const wchar_t *destFinalPath, UInt64 totalSize, Int32 updateMode)
+{
+  return MoveArc_Start_Base(srcTempPath, destFinalPath, totalSize, updateMode);
+}
+HRESULT CUpdateCallbackGUI::MoveArc_Progress(UInt64 totalSize, UInt64 currentSize)
+{
+  return MoveArc_Progress_Base(totalSize, currentSize);
+}
+HRESULT CUpdateCallbackGUI::MoveArc_Finish()
+{
+  return MoveArc_Finish_Base();
+}
+
+
 HRESULT CUpdateCallbackGUI::StartOpenArchive(const wchar_t * /* name */)
 {
   return S_OK;
@@ -260,7 +275,7 @@ HRESULT CUpdateCallbackGUI::StartOpenArchive(const wchar_t * /* name */)
 HRESULT CUpdateCallbackGUI::ReadingFileError(const FString &path, DWORD systemError)
 {
   FailedFiles.Add(path);
-  ProgressDialog->Sync.AddError_Code_Name(systemError, fs2us(path));
+  ProgressDialog->Sync.AddError_Code_Name(HRESULT_FROM_WIN32(systemError), fs2us(path));
   return S_OK;
 }
 

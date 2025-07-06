@@ -1,7 +1,7 @@
 // ProgressBox.h
 
-#ifndef __PROGRESS_BOX_H
-#define __PROGRESS_BOX_H
+#ifndef ZIP7_INC_PROGRESS_BOX_H
+#define ZIP7_INC_PROGRESS_BOX_H
 
 #include "../../../Common/MyString.h"
 #include "../../../Common/MyTypes.h"
@@ -45,7 +45,12 @@ class CProgressBox: public CPercentPrinterState
   DWORD _prevElapsedSec;
 
   bool _wasPrinted;
+public:
+  bool UseBytesForPercents;
+  DWORD StartTick;
+  unsigned MaxLen;
 
+private:
   UString _tempU;
   UString _name1U;
   UString _name2U;
@@ -64,15 +69,12 @@ class CProgressBox: public CPercentPrinterState
   void ReduceString(const UString &src, AString &dest);
 
 public:
-  DWORD StartTick;
-  bool UseBytesForPercents;
-  unsigned MaxLen;
 
   CProgressBox(UInt32 tickStep = 200):
       _tickStep(tickStep),
       _prevTick(0),
-      StartTick(0),
       UseBytesForPercents(true),
+      StartTick(0),
       MaxLen(60)
     {}
 

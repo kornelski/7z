@@ -1,7 +1,7 @@
 // Archive/ZipItem.h
 
-#ifndef __ARCHIVE_ZIP_ITEM_H
-#define __ARCHIVE_ZIP_ITEM_H
+#ifndef ZIP7_INC_ARCHIVE_ZIP_ITEM_H
+#define ZIP7_INC_ARCHIVE_ZIP_ITEM_H
 
 #include "../../../../C/CpuArch.h"
 
@@ -31,8 +31,9 @@ struct CExtraSubBlock
   CByteBuffer Data;
 
   bool ExtractNtfsTime(unsigned index, FILETIME &ft) const;
-  bool ExtractUnixTime(bool isCentral, unsigned index, UInt32 &res) const;
-  bool ExtractUnixExtraTime(unsigned index, UInt32 &res) const;
+  bool Extract_UnixTime(bool isCentral, unsigned index, UInt32 &res) const;
+  bool Extract_Unix01_Time(unsigned index, UInt32 &res) const;
+  // bool Extract_Unix_Time(unsigned index, UInt32 &res) const;
 
   bool CheckIzUnicode(const AString &s) const;
 

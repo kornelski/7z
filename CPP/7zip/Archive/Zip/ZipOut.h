@@ -1,7 +1,7 @@
 // ZipOut.h
 
-#ifndef __ZIP_OUT_H
-#define __ZIP_OUT_H
+#ifndef ZIP7_INC_ZIP_OUT_H
+#define ZIP7_INC_ZIP_OUT_H
 
 #include "../../../Common/MyCom.h"
 
@@ -18,7 +18,8 @@ public:
   FILETIME Ntfs_MTime;
   FILETIME Ntfs_ATime;
   FILETIME Ntfs_CTime;
-  bool NtfsTimeIsDefined;
+  bool Write_NtfsTime;
+  bool Write_UnixTime;
 
   // It's possible that NtfsTime is not defined, but there is NtfsTime in Extra.
   
@@ -32,7 +33,10 @@ public:
     return 4 + 5 + size;
   }
 
-  CItemOut(): NtfsTimeIsDefined(false) {}
+  CItemOut():
+      Write_NtfsTime(false),
+      Write_UnixTime(false)
+      {}
 };
 
 
@@ -62,6 +66,7 @@ class COutArchive
     Write32(ft.dwHighDateTime);
   }
 
+  void WriteTimeExtra(const CItemOut &item, bool writeNtfs);
   void WriteUtfName(const CItemOut &item);
   void WriteExtra(const CExtraBlock &extra);
   void WriteCommonItemInfo(const CLocalItem &item, bool isZip64);
@@ -69,6 +74,10 @@ class COutArchive
 
   void SeekToCurPos();
 public:
+  CMyComPtr<IStreamSetRestriction> SetRestriction;
+
+  HRESULT ClearRestriction();
+  HRESULT SetRestrictionFromCurrent();
   HRESULT Create(IOutStream *outStream);
   
   UInt64 GetCurPos() const { return m_CurPos; }
@@ -83,7 +92,7 @@ public:
 
   void WriteDescriptor(const CItemOut &item);
 
-  void WriteCentralDir(const CObjectVector<CItemOut> &items, const CByteBuffer *comment);
+  HRESULT WriteCentralDir(const CObjectVector<CItemOut> &items, const CByteBuffer *comment);
 
   void CreateStreamForCompressing(CMyComPtr<IOutStream> &outStream);
   void CreateStreamForCopying(CMyComPtr<ISequentialOutStream> &outStream);
